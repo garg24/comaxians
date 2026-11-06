@@ -104,7 +104,7 @@ puis, sur le Pi, ajoutez `--import-data ~/comaxians-data` à la commande d'insta
 curl -fsSL https://raw.githubusercontent.com/garg24/comaxians/main/install.sh | bash -s -- --screen accueil --import-data ~/comaxians-data
 ```
 
-Sans cette étape, le Pi démarre avec quelques contenus d'exemple.
+Sans cette étape, le Pi démarre avec 8 contenus d'exemple (personnes fictives) qui montrent chaque type de diapositive : Succès, Chiffre clé avec compteur de jours automatique, Actualité, Employé du mois, Partenaire, Événement (dans 3 semaines), Anniversaires (une personne fêtée le jour de l'installation) et Message. Modifiez-les ou supprimez-les depuis l'admin.
 
 **Mise à jour** : relancez simplement la commande (le code est mis à jour par `git pull`, vos contenus sont conservés) :
 

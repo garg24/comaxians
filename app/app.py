@@ -168,27 +168,63 @@ def init_db():
     db.close()
 
 
+MONTHS_FR = ["janvier", "février", "mars", "avril", "mai", "juin", "juillet",
+             "août", "septembre", "octobre", "novembre", "décembre"]
+
+
+def month_label(d: date) -> str:
+    """« Novembre 2026 »"""
+    return f"{MONTHS_FR[d.month - 1].capitalize()} {d.year}"
+
+
 def _seed(db: sqlite3.Connection):
+    """Contenus d'exemple créés à la toute première installation (un par grand type de contenu).
+    Les personnes citées sont fictives ; les dates sont calculées à partir du jour d'installation."""
     now = datetime.now().isoformat(timespec="seconds")
-    demo = [
-        ("succes", "Nouveau contrat", "La Métropole nous confie son réseau fibre",
-         "Déploiement et maintenance de 450 km de fibre optique pour connecter les bâtiments publics du territoire.",
-         "450 km", "de fibre déployée"),
-        ("chiffre", "Sécurité", "Jours sans accident",
-         "Merci à toutes et à tous pour votre vigilance au quotidien sur nos chantiers.", "312", "jours consécutifs"),
-        ("actualite", "Vie de l'agence", "Bienvenue aux nouveaux arrivants",
-         "Ce mois-ci, 6 collaborateurs ont rejoint nos équipes Cloud, Cybersécurité et Réseaux. Réservez-leur un bel accueil !",
-         "", ""),
-        ("partenaire", "Partenaire", "Partenariat Gold renouvelé",
-         "Notre expertise reconnue sur les infrastructures datacenter et la sécurité réseau.", "", ""),
-        ("evenement", "Agenda", "Afterwork Innovation",
-         "Démonstrations IoT & IA par nos équipes – Espace Atrium, 18h00", "28", "novembre"),
-        ("message", "Nos valeurs", "The best of ICT with a human touch", "", "", ""),
+    today = date.today()
+    event_day = today + timedelta(days=21)
+    birthdays = [   # Léa est fêtée le jour de l'installation, pour voir la diapositive tout de suite
+        {"first": "Léa", "last": "Bernard", "day": today.day, "month": today.month},
+        {"first": "Hugo", "last": "Petit", "day": 14, "month": 3},
+        {"first": "Nina", "last": "Robert", "day": 2, "month": 9},
     ]
-    for i, (t, k, title, body, hl, hll) in enumerate(demo):
-        db.execute(
-            "INSERT INTO slides(type, kicker, title, body, highlight, highlight_label, position, updated_at)"
-            " VALUES (?,?,?,?,?,?,?,?)", (t, k, title, body, hl, hll, i, now))
+    if today.month == 2 and today.day == 29:          # date impossible à fêter les autres années
+        birthdays[0]["day"] = 28
+    birthdays.sort(key=lambda p: (p["month"], p["day"]))
+    demo = [
+        dict(type="succes", kicker="Nouveau contrat", title="La Métropole nous confie son réseau fibre",
+             body="Déploiement et maintenance de 450 km de fibre optique pour connecter les bâtiments publics du territoire.",
+             highlight="450 km", highlight_label="de fibre déployée", entities="Communication"),
+        dict(type="chiffre", kicker="Sécurité", title="Jours sans accident",
+             body="Merci à toutes et à tous pour votre vigilance au quotidien sur nos chantiers.",
+             highlight_label="jours consécutifs",
+             # compteur automatique : 312 aujourd'hui, puis +1 chaque jour
+             counter_date=(today - timedelta(days=312)).isoformat()),
+        dict(type="actualite", kicker="Vie de l'agence", title="Bienvenue aux nouveaux arrivants",
+             body="Ce mois-ci, 6 collaborateurs ont rejoint nos équipes Cloud, Cybersécurité et Réseaux. "
+                  "Réservez-leur un bel accueil !",
+             entities="Cloud,Communication"),
+        dict(type="employe", kicker="Employé du mois", title="Camille Martin",
+             highlight=month_label(today), highlight_label="Cheffe de projet Cloud",
+             body="Pour son engagement exemplaire sur la migration de nos clients vers le cloud, "
+                  "livrée dans les temps et saluée par tous.",
+             entities="Cloud"),
+        dict(type="partenaire", kicker="Partenaire", title="Partenariat Gold renouvelé",
+             body="Notre expertise reconnue sur les infrastructures datacenter et la sécurité réseau.",
+             entities="Cloud"),
+        dict(type="evenement", kicker="Agenda", title="Afterwork Innovation",
+             body="Démonstrations IoT & IA par nos équipes – Espace Atrium, 18h00",
+             highlight=str(event_day.day), highlight_label=MONTHS_FR[event_day.month - 1]),
+        dict(type="anniversaire", kicker="Anniversaires", title="Joyeux anniversaire !",
+             body="Toute l'équipe vous souhaite une excellente journée !",
+             people=json.dumps(birthdays, ensure_ascii=False)),
+        dict(type="message", kicker="Nos valeurs", title="The best of ICT with a human touch"),
+    ]
+    for i, s in enumerate(demo):
+        s = {"body": "", "highlight": "", "highlight_label": "", "counter_date": "", "entities": "",
+             "people": ""} | s | {"position": i, "updated_at": now}
+        cols = ", ".join(s)
+        db.execute(f"INSERT INTO slides({cols}) VALUES ({', '.join('?' * len(s))})", list(s.values()))
 
 
 def get_settings() -> dict:
@@ -677,10 +713,7 @@ def slide_new():
         return redirect(url_for("admin"))
     blank = {"type": request.args.get("type", "actualite"), "active": 1}
     if blank["type"] == "employe":   # pré-remplissage pratique
-        months = ["janvier", "février", "mars", "avril", "mai", "juin", "juillet",
-                  "août", "septembre", "octobre", "novembre", "décembre"]
-        today = date.today()
-        blank |= {"kicker": "Employé du mois", "highlight": f"{months[today.month - 1].capitalize()} {today.year}"}
+        blank |= {"kicker": "Employé du mois", "highlight": month_label(date.today())}
     if blank["type"] == "anniversaire":
         blank |= {"kicker": "Anniversaires", "title": "Joyeux anniversaire !",
                   "body": "Toute l'équipe vous souhaite une excellente journée !"}
