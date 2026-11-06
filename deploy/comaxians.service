@@ -1,0 +1,20 @@
+# Service systemd pour héberger le serveur sur une machine Linux (VM, NAS, ou un Raspberry Pi dédié)
+# Installation :
+#   sudo cp deploy/comaxians.service /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now comaxians
+[Unit]
+Description=Axians - affichage dynamique
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=comaxians
+WorkingDirectory=/opt/comaxians
+Environment=PORT=8080
+Environment=COMAXIANS_ADMIN_PASSWORD=changez-moi
+ExecStart=/opt/comaxians/.venv/bin/python run.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

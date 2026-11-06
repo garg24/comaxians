@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block title %}Connexion{% endblock %}
+{% block content %}
+<div class="login">
+  <h1>Connexion</h1>
+  <p class="muted">Espace de gestion des contenus diffusés sur les écrans.</p>
+  <form method="post" class="card">
+    <label>Mot de passe
+      <input type="password" name="password" autofocus required autocomplete="current-password">
+    </label>
+    <button class="btn btn-primary" type="submit">Se connecter</button>
+  </form>
+</div>
+{% endblock %}

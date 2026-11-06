@@ -1,0 +1,187 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1>Contenus diffusés</h1>
+    <p class="muted">{{ slides|selectattr('live')|list|length }} diapositive(s) en diffusion aujourd'hui · ordre de passage de haut en bas</p>
+  </div>
+  {% set type_help = {
+    'succes': "Victoire commerciale, projet livré",
+    'actualite': "Information interne, vie de l'agence",
+    'partenaire': "Logo et message d'un partenaire",
+    'evenement': "Date en grand, lieu, horaire",
+    'employe': "Photo, nom et poste d'un collaborateur",
+    'anniversaire': "S'affiche seul les jours d'anniversaire",
+    'chiffre': "Indicateur en grand ou compteur de jours",
+    'message': "Citation ou message fort",
+    'video': "Vidéo en plein écran",
+    'image': "Affiche déjà mise en page (16/9)",
+  } %}
+  <details class="new-content" id="new-content" {% if request.args.get('new') %}open{% endif %}>
+    <summary class="btn btn-primary btn-new">＋ Nouveau contenu</summary>
+    <div class="new-panel">
+      <p class="new-panel-title">Quel type de contenu ?</p>
+      <div class="new-grid">
+        {% for key, label in types.items() %}
+        <a class="type-card c-{{ key }}" href="{{ url_for('slide_new', type=key) }}">
+          <span class="type-dot"></span>
+          <span><strong>{{ label }}</strong><small>{{ type_help.get(key, '') }}</small></span>
+        </a>
+        {% endfor %}
+      </div>
+    </div>
+  </details>
+</div>
+
+<div class="list">
+  {% for s in slides %}
+  <article class="row c-{{ s.type }} {% if not s.live %}is-off{% endif %}">
+    <div class="thumb">
+      {% if s.media_type == 'video' %}<video src="{{ url_for('uploaded', name=s.image) }}#t=1" muted preload="metadata"></video><span class="play">▶</span>
+      {% elif s.image %}<img src="{{ url_for('uploaded', name=s.image) }}" alt="">{% endif %}
+    </div>
+    <div class="info">
+      <div class="meta">
+        <span class="tag">{{ types.get(s.type, s.type) }}</span>
+        {% for e in s.entity_tags %}<span class="ent-mini" style="--ec: {{ e.color }}">{{ e.name }}</span>{% endfor %}
+        {% if s.counter_date and s.counter_days is not none %}<span class="counter-pill">⏱ {{ s.counter_days }} jour{{ 's' if s.counter_days > 1 }} · depuis le {{ s.counter_date[8:10] }}/{{ s.counter_date[5:7] }}/{{ s.counter_date[:4] }}</span>{% endif %}
+        {% if s.type in LAYOUT_TYPES and s.layout == 'left' %}<span class="muted small">⇄ Visuel à gauche</span>{% endif %}
+        {% if s.media_type == 'video' and s.sound %}<span class="muted small">🔊 Son activé</span>{% endif %}
+        {% if s.live %}<span class="status on">En diffusion</span>
+        {% elif not s.active %}<span class="status">Désactivée</span>
+        {% elif s.waiting %}<span class="status">En attente · aucun anniversaire aujourd'hui</span>
+        {% else %}<span class="status">Hors période</span>{% endif %}
+        {% if s.bday %}
+          <span class="bday-pill">🎂 {{ s.bday.count }} personne{{ 's' if s.bday.count > 1 }}
+            {%- if s.bday.today %} · aujourd'hui : {{ s.bday.today | join(', ') }}{% endif %}
+            {%- if s.bday.next %} · prochain : {{ s.bday.next | join(', ') }} le {{ s.bday.next_date }}{% endif %}</span>
+        {% endif %}
+        {% if s.start_date or s.end_date %}<span class="muted small">{{ s.start_date or '…' }} → {{ s.end_date or '…' }}</span>{% endif %}
+        {% if s.screens %}<span class="muted small">Écrans : {{ s.screens }}</span>{% endif %}
+      </div>
+      <h3>{{ s.title or (types.get(s.type) ~ ' sans titre') }}</h3>
+      {% if s.body %}<p class="muted small clamp">{{ s.body }}</p>{% endif %}
+    </div>
+    <div class="actions">
+      <form method="post" action="{{ url_for('slide_move', sid=s.id, direction='up') }}"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><button class="icon" title="Monter" {% if loop.first %}disabled{% endif %}>↑</button></form>
+      <form method="post" action="{{ url_for('slide_move', sid=s.id, direction='down') }}"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><button class="icon" title="Descendre" {% if loop.last %}disabled{% endif %}>↓</button></form>
+      {% if s.counter_date %}
+      <form method="post" action="{{ url_for('slide_reset_counter', sid=s.id) }}" data-confirm="Confirmer : remettre à 0 ?"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><button class="btn" title="Nouvel événement aujourd'hui : la date du dernier événement devient aujourd'hui">↺ Remettre à zéro</button></form>
+      {% endif %}
+      <a class="btn" href="{{ url_for('display', preview=s.id) }}" target="_blank" rel="noopener">Aperçu</a>
+      <a class="btn" href="{{ url_for('slide_edit', sid=s.id) }}">Modifier</a>
+      <form method="post" action="{{ url_for('slide_toggle', sid=s.id) }}"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><button class="btn">{{ 'Désactiver' if s.active else 'Activer' }}</button></form>
+      <form method="post" action="{{ url_for('slide_delete', sid=s.id) }}" data-confirm="Confirmer la suppression ?"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><button class="btn btn-danger">Supprimer</button></form>
+    </div>
+  </article>
+  {% else %}
+  <div class="empty card">Aucun contenu pour l'instant. Cliquez sur « ＋ Nouveau contenu » en haut à droite.</div>
+  {% endfor %}
+</div>
+
+<section class="card settings">
+  <h2>Paramètres des écrans</h2>
+  <form method="post" action="{{ url_for('settings_save') }}" class="grid2">
+    <input type="hidden" name="csrf" value="{{ csrf_token() }}">
+    <label class="span2">Bandeau défilant « En bref » <span class="muted small">(une information par ligne)</span>
+      <textarea name="ticker" rows="4" placeholder="Ex. : Le restaurant d'entreprise sera fermé vendredi">{{ settings.ticker }}</textarea>
+    </label>
+    <label>Durée par défaut d'une diapositive (secondes)
+      <input type="number" name="default_duration" min="4" max="120" value="{{ settings.default_duration }}">
+    </label>
+    <div class="checks">
+      <label class="check"><input type="checkbox" name="show_clock" {% if settings.show_clock == '1' %}checked{% endif %}> Afficher l'heure et la date</label>
+      <label class="check"><input type="checkbox" name="show_ticker" {% if settings.show_ticker == '1' %}checked{% endif %}> Afficher le bandeau défilant</label>
+    </div>
+    <div>
+      <span class="field-label">Thème par défaut des écrans</span>
+      <div class="seg-ctl">
+        {% for key, label in themes.items() %}
+          <label><input type="radio" name="default_theme" value="{{ key }}" {% if settings.default_theme == key %}checked{% endif %}><span>{{ theme_icons[key] }} {{ label }}</span></label>
+        {% endfor %}
+      </div>
+    </div>
+    <label>Entités de la société <span class="muted small">(une par ligne – proposées à chaque diapositive)</span>
+      <textarea name="entities" rows="3" placeholder="Cloud&#10;Communication">{{ settings.entities }}</textarea>
+    </label>
+    <div class="span2"><button class="btn btn-primary">Enregistrer les paramètres</button></div>
+  </form>
+</section>
+
+<section class="card settings" id="ecrans">
+  <h2>Écrans</h2>
+  <p class="muted small" style="margin-top:-8px">Choisissez le thème de chaque écran. Le changement s'applique en moins d'une minute, sans intervention sur le Raspberry Pi.</p>
+
+  {% if screens %}
+  <div class="screens">
+    {% for sc in screens %}
+    <div class="screen-row">
+      <div class="screen-name">
+        <span class="dot {{ 'on' if sc.online else '' }}" title="{{ 'En ligne' if sc.online else 'Hors ligne' }}"></span>
+        <div>
+          <strong>{{ sc.name }}</strong>
+          <div class="muted small">
+            {% if sc.online %}En ligne{% elif sc.last_seen %}Vu le {{ sc.last_seen[8:10] }}/{{ sc.last_seen[5:7] }} à {{ sc.last_seen[11:16] }}{% else %}Jamais connecté{% endif %}
+          </div>
+        </div>
+      </div>
+      <form method="post" action="{{ url_for('screen_save') }}" class="seg-ctl">
+        <input type="hidden" name="csrf" value="{{ csrf_token() }}">
+        <input type="hidden" name="name" value="{{ sc.name }}">
+        <label><input type="radio" name="theme" value="" {% if not sc.theme %}checked{% endif %} onchange="this.form.submit()"><span>Par défaut ({{ themes[settings.default_theme]|lower }})</span></label>
+        {% for key, label in themes.items() %}
+          <label><input type="radio" name="theme" value="{{ key }}" {% if sc.theme == key %}checked{% endif %} onchange="this.form.submit()"><span>{{ theme_icons[key] }} {{ label }}</span></label>
+        {% endfor %}
+      </form>
+      <div class="actions">
+        <a class="btn" href="{{ url_for('display', screen=sc.name) }}" target="_blank" rel="noopener">Ouvrir ↗</a>
+        {% if sc.last_seen or sc.theme %}
+        <form method="post" action="{{ url_for('screen_delete') }}" data-confirm="Retirer ?">
+          <input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="name" value="{{ sc.name }}">
+          <button class="icon" title="Retirer">×</button>
+        </form>
+        {% endif %}
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  <form method="post" action="{{ url_for('screen_save') }}" class="add-screen">
+    <input type="hidden" name="csrf" value="{{ csrf_token() }}">
+    <input name="name" placeholder="Nom d'un nouvel écran (ex. : accueil)" maxlength="40" required>
+    <select name="theme">
+      <option value="">Thème par défaut</option>
+      {% for key, label in themes.items() %}<option value="{{ key }}">{{ label }}</option>{% endfor %}
+    </select>
+    <button class="btn">Ajouter l'écran</button>
+  </form>
+
+  <div class="install-box">
+    <strong>Installer un nouvel écran (Raspberry Pi)</strong>
+    <p class="muted small">Sur le nouveau Raspberry Pi (Raspberry Pi OS Desktop, connecté au même réseau), ouvrez un terminal et collez cette commande en remplaçant <em>NOM</em> par le nom de l'écran (ex. : hall, cafeteria) :</p>
+    {% set server_host = request.host %}
+    <div class="cmd">
+      <code id="install-cmd">curl -fsSL http://{{ server_host }}/install-ecran.sh | bash -s -- --server {{ server_host }} --screen NOM</code>
+      <button type="button" class="btn btn-sm" id="copy-cmd">Copier</button>
+    </div>
+    {% if request.host.split(':')[0] in ('localhost', '127.0.0.1') %}
+    <p class="muted small">⚠ Vous consultez l'admin via <code>localhost</code> : remplacez-le par l'adresse IP du serveur dans la commande.</p>
+    {% endif %}
+    <p class="muted small">Puis redémarrez le Pi : l'écran apparaît automatiquement dans la liste ci-dessus, où vous choisissez son thème.</p>
+  </div>
+  <p class="muted small">Adresse affichée par chaque écran : <code>{{ url_for('display', _external=True) }}?screen=<em>nom</em></code>. Sans <code>?screen=</code>, l'écran utilise le thème par défaut.</p>
+  <script>
+    document.getElementById('copy-cmd').addEventListener('click', async (e) => {
+      const text = document.getElementById('install-cmd').textContent;
+      try { await navigator.clipboard.writeText(text); }
+      catch (_) {   // presse-papiers indisponible hors HTTPS : sélection du texte
+        const r = document.createRange(); r.selectNodeContents(document.getElementById('install-cmd'));
+        const s = getSelection(); s.removeAllRanges(); s.addRange(r); document.execCommand('copy');
+      }
+      e.target.textContent = 'Copié ✓';
+      setTimeout(() => { e.target.textContent = 'Copier'; }, 2000);
+    });
+  </script>
+</section>
+{% endblock %}

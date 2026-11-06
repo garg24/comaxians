@@ -1,0 +1,10 @@
+* text=auto
+# Fichiers utilisés sous Linux / Raspberry Pi : toujours en fins de ligne Unix
+*.sh text eol=lf
+*.service text eol=lf
+Dockerfile text eol=lf
+# Fichiers binaires
+*.png binary
+*.jpg binary
+*.webp binary
+*.mp4 binary

@@ -1,0 +1,297 @@
+{% extends "base.html" %}
+{% block title %}{{ 'Modifier' if slide.id else 'Nouvelle diapositive' }}{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <a href="{{ url_for('admin') }}" class="muted small">← Retour aux contenus</a>
+    <h1>{{ 'Modifier la diapositive' if slide.id else 'Nouvelle diapositive' }}</h1>
+  </div>
+</div>
+
+<form method="post" enctype="multipart/form-data" class="card editor" id="editor">
+  <input type="hidden" name="csrf" value="{{ csrf_token() }}">
+
+  <fieldset class="types">
+    <legend>Type de contenu</legend>
+    {% for key, label in types.items() %}
+      <label class="type-opt">
+        <input type="radio" name="type" value="{{ key }}" {% if slide.type == key %}checked{% endif %}>
+        <span class="chip c-{{ key }}">{{ label }}</span>
+      </label>
+    {% endfor %}
+    <p class="hint muted small" id="type-hint"></p>
+  </fieldset>
+
+  <div class="grid2">
+    <label>Surtitre <span class="muted small">(ex. : Nouveau contrat, Agenda…)</span>
+      <input name="kicker" maxlength="80" value="{{ slide.kicker or '' }}">
+    </label>
+    <label><span id="title-label">Titre *</span>
+      <input name="title" id="title" maxlength="200" value="{{ slide.title or '' }}">
+    </label>
+    {% if ENTITIES %}
+    {% set chosen = (slide.entities or '').lower().split(',') %}
+    <div class="span2 f-entities">
+      <span class="field-label">Entité(s) concernée(s) <span class="muted small" style="font-weight:400">(affichées à côté du surtitre – aucune, une ou plusieurs)</span></span>
+      <div class="entity-pick">
+        {% for e in ENTITIES %}
+        <label>
+          <input type="checkbox" name="entities" value="{{ e.name }}" {% if e.name.lower() in chosen %}checked{% endif %}>
+          <span class="ent-chip" style="--ec: {{ e.color }}">{{ e.name }}</span>
+        </label>
+        {% endfor %}
+      </div>
+    </div>
+    {% endif %}
+    <label class="span2">Texte <span class="muted small">(court : 2–3 lignes maximum pour rester lisible à distance)</span>
+      <textarea name="body" rows="3" maxlength="600">{{ slide.body or '' }}</textarea>
+    </label>
+    <div class="span2 f-people">
+      <div class="people-head">
+        <span class="field-label">Personnes <span class="muted small" id="people-count"></span></span>
+        <div class="people-tools">
+          <button type="button" class="btn btn-sm" id="people-add">+ Ajouter une personne</button>
+          <button type="button" class="btn btn-sm" id="people-import-toggle">⇪ Importer une liste</button>
+        </div>
+      </div>
+      <div class="people-import" id="people-import" hidden>
+        <p class="muted small">Collez une ligne par personne : <code>Prénom ; Nom ; JJ/MM</code>, ou copiez directement trois colonnes depuis Excel (Prénom, Nom, Date).</p>
+        <textarea id="people-paste" rows="5" placeholder="Marie;Dupont;14/03&#10;Julien;Martin;02/11"></textarea>
+        <div class="people-import-actions">
+          <button type="button" class="btn btn-sm btn-primary" id="people-import-go">Ajouter à la liste</button>
+          <span class="muted small" id="people-import-result"></span>
+        </div>
+      </div>
+      <div class="people-table">
+        <div class="people-row people-labels"><span>Prénom</span><span>Nom</span><span>Anniversaire (JJ/MM)</span><span></span></div>
+        <div id="people-rows">
+          {% set prows = slide._people_raw if slide._people_raw is defined else (slide.people | from_json) %}
+          {% for p in prows %}
+          <div class="people-row">
+            <input name="people_first" value="{{ p.first }}" placeholder="Prénom" maxlength="40">
+            <input name="people_last" value="{{ p.last }}" placeholder="Nom" maxlength="40">
+            <input name="people_date" value="{{ p.date if p.date is defined else '%02d/%02d' | format(p.day, p.month) }}" placeholder="JJ/MM" inputmode="numeric" maxlength="10">
+            <button type="button" class="icon people-del" title="Retirer cette personne">×</button>
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+      <template id="people-row-tpl">
+        <div class="people-row">
+          <input name="people_first" placeholder="Prénom" maxlength="40">
+          <input name="people_last" placeholder="Nom" maxlength="40">
+          <input name="people_date" placeholder="JJ/MM" inputmode="numeric" maxlength="10">
+          <button type="button" class="icon people-del" title="Retirer cette personne">×</button>
+        </div>
+      </template>
+      <p class="muted small">L'année de naissance n'est pas nécessaire (si elle est saisie, elle n'est pas conservée). Les personnes nées un 29 février sont fêtées le 28 les années non bissextiles.</p>
+    </div>
+    <div class="span2 f-counter">
+      <span class="field-label">Type de chiffre</span>
+      <div class="seg-ctl">
+        <label><input type="radio" name="counter_mode" value="fixed" {% if not slide.counter_date %}checked{% endif %}><span>Valeur fixe</span></label>
+        <label><input type="radio" name="counter_mode" value="days" {% if slide.counter_date %}checked{% endif %}><span>⏱ Compteur de jours automatique</span></label>
+      </div>
+      <div class="f-days counter-box">
+        <label>Date du dernier événement
+          <input type="date" name="counter_date" id="counter-date" value="{{ slide.counter_date or '' }}">
+        </label>
+        <p class="muted small" id="days-preview"></p>
+      </div>
+    </div>
+    <label class="f-highlight f-value"><span id="hl-label">Chiffre mis en avant</span>
+      <input name="highlight" maxlength="20" value="{{ slide.highlight or '' }}" placeholder="Ex. : 450 km, +25 %, 28">
+    </label>
+    <label class="f-highlight"><span id="hll-label">Légende du chiffre</span>
+      <input name="highlight_label" maxlength="60" value="{{ slide.highlight_label or '' }}" placeholder="Ex. : de fibre déployée, novembre">
+    </label>
+    <div class="span2 f-image">
+      <label><span id="img-label">Image ou vidéo</span> <span class="muted small" id="img-help"></span>
+        <input type="file" name="image" id="media-input">
+      </label>
+      {% if slide.image %}
+        <span class="current-img">
+          {% if slide.image.rsplit('.', 1)[-1].lower() in ['mp4', 'webm', 'm4v', 'mov'] %}
+            <video src="{{ url_for('uploaded', name=slide.image) }}#t=1" muted preload="metadata" controls></video>
+          {% else %}<img src="{{ url_for('uploaded', name=slide.image) }}" alt="">{% endif %}
+          <label class="check"><input type="checkbox" name="remove_image"> Retirer le média actuel</label>
+        </span>
+      {% endif %}
+      <label class="check f-sound" style="margin-top:12px"><input type="checkbox" name="sound" {% if slide.sound %}checked{% endif %}> Activer le son (écran équipé de haut-parleurs)</label>
+    </div>
+    <div class="span2 f-layout">
+      <span class="field-label">Disposition</span>
+      <div class="layout-pick">
+        {% for key, label in LAYOUTS.items() %}
+        <label>
+          <input type="radio" name="layout" value="{{ key }}" {% if (slide.layout or 'right') == key %}checked{% endif %}>
+          <span class="lay-card">
+            <span class="lay-prev lay-{{ key }}"><i class="t"><b></b><b></b><b></b></i><i class="v"></i></span>
+            <span>{{ 'Texte à gauche, visuel à droite' if key == 'right' else 'Visuel à gauche, texte à droite' }}</span>
+          </span>
+        </label>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+
+  <details class="advanced" open>
+    <summary>Programmation et diffusion</summary>
+    <div class="grid3">
+      <label>Début de diffusion
+        <input type="date" name="start_date" value="{{ slide.start_date or '' }}">
+      </label>
+      <label>Fin de diffusion
+        <input type="date" name="end_date" value="{{ slide.end_date or '' }}">
+      </label>
+      <label>Durée d'affichage (s)
+        <input type="number" name="duration" id="duration" min="0" max="900" value="{{ slide.duration or '' }}" placeholder="par défaut">
+      </label>
+      <label class="span3">Écrans ciblés <span class="muted small">(noms séparés par des virgules, vide = tous les écrans)</span>
+        <input name="screens" value="{{ slide.screens or '' }}" placeholder="Ex. : accueil, cafeteria">
+      </label>
+      <label class="check"><input type="checkbox" name="active" {% if slide.active %}checked{% endif %}> Diapositive active</label>
+    </div>
+  </details>
+
+  <div class="form-actions">
+    <a href="{{ url_for('admin') }}" class="btn">Annuler</a>
+    <button class="btn btn-primary" type="submit">Enregistrer</button>
+  </div>
+</form>
+
+<script>
+  // Adapte les libellés du formulaire au type de contenu choisi
+  const IMG = ".png,.jpg,.jpeg,.webp,.gif,.svg", VID = ".mp4,.webm,.m4v,.mov";
+  const IMG_HELP = "(JPG, PNG, WebP – idéalement 1920 px de large)";
+  const ANY_HELP = "(image JPG/PNG/WebP, ou vidéo MP4 courte qui tournera en boucle)";
+  const VID_HELP = "(MP4 H.264, 1080p, 30 i/s conseillé – WebM accepté)";
+  // [aide, libellé chiffre, libellé légende, libellé média, formats, aide formats]
+  const hints = {
+    succes:     ["Mettez en avant une victoire commerciale ou un projet livré.", "Chiffre clé", "Légende du chiffre", "Photo ou vidéo du projet", IMG + "," + VID, ANY_HELP],
+    actualite:  ["Une information interne : vie de l'agence, RH, nouvelles offres…", null, null, "Photo ou vidéo", IMG + "," + VID, ANY_HELP],
+    partenaire: ["Présentez un partenaire. Téléversez son logo (PNG/SVG), affiché sur une carte blanche.", null, null, "Logo du partenaire", IMG, "(PNG ou SVG, fond transparent)"],
+    evenement:  ["Annoncez un événement : le jour et le mois s'affichent en grand.", "Jour (ex. : 28)", "Mois (ex. : novembre)", "Photo ou vidéo d'ambiance (facultative)", IMG + "," + VID, ANY_HELP],
+    anniversaire: ["Souhaitez les anniversaires automatiquement : la diapositive n'apparaît sur les écrans que les jours où au moins une personne de la liste est fêtée, avec son prénom et son nom.", null, null, null],
+    employe:    ["Mettez un collaborateur à l'honneur : sa photo, son nom, son poste et quelques mots sur ce qui lui vaut cette distinction (affichés comme une citation). Sans photo, ses initiales sont affichées.", "Période (ex. : Novembre 2026)", "Poste / équipe (ex. : Cheffe de projet Cloud)", "Photo du collaborateur", IMG, "(portrait JPG/PNG, visage centré – affichée dans un cercle)"],
+    chiffre:    ["Un indicateur affiché en très grand au centre de l'écran.", "Valeur (ex. : 312)", "Unité / légende", null],
+    message:    ["Un message fort ou une citation, en grand au centre de l'écran.", null, null, null],
+    video:      ["Une vidéo plein écran. Sans durée renseignée, elle est lue jusqu'au bout. Le titre (facultatif) s'affiche quelques secondes en bas de l'écran.", null, null, "Fichier vidéo *", VID, VID_HELP],
+    image:      ["Une affiche déjà mise en page (1920 × 1080) affichée en grand. Le titre sert uniquement à la retrouver dans la liste.", null, null, "Affiche (16/9) *", IMG, IMG_HELP],
+  };
+  function sync() {
+    const t = document.querySelector('input[name=type]:checked')?.value || 'actualite';
+    const [hint, hl, hll, img, accept, help] = hints[t];
+    document.getElementById('type-hint').textContent = hint;
+    document.querySelectorAll('.f-highlight').forEach(e => e.hidden = !hl);
+    if (hl) { document.getElementById('hl-label').textContent = hl; document.getElementById('hll-label').textContent = hll; }
+    // Chiffre clé : valeur fixe ou compteur de jours depuis une date
+    const isCounter = t === 'chiffre' && document.querySelector('input[name=counter_mode]:checked')?.value === 'days';
+    document.querySelector('.f-counter').hidden = t !== 'chiffre';
+    document.querySelector('.f-days').hidden = !isCounter;
+    document.querySelector('.f-value').hidden = !hl || isCounter;
+    document.getElementById('counter-date').required = isCounter;
+    if (isCounter) {
+      document.getElementById('hll-label').textContent = 'Légende (ex. : jours sans accident)';
+      updateDaysPreview();
+    }
+    document.querySelector('.f-image').hidden = !img;
+    if (img) {
+      document.getElementById('img-label').textContent = img;
+      document.getElementById('img-help').textContent = help;
+      document.getElementById('media-input').accept = accept;
+    }
+    document.querySelector('.f-sound').hidden = t !== 'video';
+    document.querySelector('.f-people').hidden = t !== 'anniversaire';
+    if (t === 'anniversaire' && !peopleRows.children.length) addPerson();
+    document.querySelector('.f-entities')?.toggleAttribute('hidden', t === 'image');
+    document.querySelector('.f-layout').hidden = !{{ LAYOUT_TYPES|tojson }}.includes(t);
+    const optional = t === 'video' || t === 'image';
+    document.getElementById('title').required = !optional;
+    document.getElementById('title-label').textContent = optional ? 'Titre (facultatif)' : (t === 'employe' ? 'Prénom et nom *' : 'Titre *');
+    const ph = { employe: ['Ex. : Novembre 2026', 'Ex. : Cheffe de projet Cloud – équipe Lyon', 'Ex. : Marie Dupont'] }[t]
+            || ['Ex. : 450 km, +25 %, 28', 'Ex. : de fibre déployée, novembre', ''];
+    document.querySelector('input[name=highlight]').placeholder = ph[0];
+    document.querySelector('input[name=highlight_label]').placeholder = ph[1];
+    document.getElementById('title').placeholder = ph[2];
+    document.getElementById('duration').placeholder = t === 'video' ? 'durée de la vidéo' : 'par défaut';
+  }
+  /* ------------------------------------------------ liste des anniversaires */
+  const peopleRows = document.getElementById('people-rows');
+  const DATE_RE = /^\s*\d{1,2}\s*[\/.\-]\s*\d{1,2}\s*([\/.\-]\s*\d{2,4})?\s*$/;
+  function addPerson(first = '', last = '', when = '') {
+    const node = document.getElementById('people-row-tpl').content.firstElementChild.cloneNode(true);
+    const [f, l, d] = node.querySelectorAll('input');
+    f.value = first; l.value = last; d.value = when;
+    peopleRows.append(node);
+    checkDate(d);
+    updatePeopleCount();
+    return node;
+  }
+  function checkDate(input) {
+    input.classList.toggle('invalid', input.value.trim() !== '' && !DATE_RE.test(input.value));
+  }
+  function updatePeopleCount() {
+    const n = [...peopleRows.querySelectorAll('.people-row')]
+      .filter(r => [...r.querySelectorAll('input')].some(i => i.value.trim())).length;
+    document.getElementById('people-count').textContent = n ? `(${n})` : '';
+  }
+  peopleRows.addEventListener('click', (e) => {
+    if (!e.target.classList.contains('people-del')) return;
+    e.target.closest('.people-row').remove();
+    updatePeopleCount();
+  });
+  peopleRows.addEventListener('input', (e) => {
+    if (e.target.name === 'people_date') checkDate(e.target);
+    updatePeopleCount();
+  });
+  document.getElementById('people-add').addEventListener('click', () => addPerson().querySelector('input').focus());
+  document.getElementById('people-import-toggle').addEventListener('click', () => {
+    const box = document.getElementById('people-import');
+    box.hidden = !box.hidden;
+    if (!box.hidden) document.getElementById('people-paste').focus();
+  });
+  document.getElementById('people-import-go').addEventListener('click', () => {
+    const area = document.getElementById('people-paste');
+    // Supprime les lignes entièrement vides avant d'ajouter les nouvelles
+    [...peopleRows.querySelectorAll('.people-row')]
+      .filter(r => ![...r.querySelectorAll('input')].some(i => i.value.trim())).forEach(r => r.remove());
+    let added = 0, skipped = 0;
+    area.value.split(/\r?\n/).forEach((line) => {
+      if (!line.trim()) return;
+      let parts = line.split(/\t|;/).map(s => s.trim()).filter(Boolean);
+      if (parts.length < 2) { skipped++; return; }
+      const when = parts.pop();
+      let first = parts[0], last = parts.slice(1).join(' ');
+      if (parts.length === 1) {            // « Marie Dupont ; 14/03 » : on sépare prénom et nom
+        const words = first.split(/\s+/);
+        first = words.shift(); last = words.join(' ');
+      }
+      if (!DATE_RE.test(when)) { skipped++; return; }
+      addPerson(first, last, when);
+      added++;
+    });
+    document.getElementById('people-import-result').textContent =
+      `${added} personne(s) ajoutée(s)` + (skipped ? `, ${skipped} ligne(s) ignorée(s) (format non reconnu)` : '') + '. Pensez à enregistrer.';
+    if (added) area.value = '';
+  });
+  peopleRows.querySelectorAll('input[name=people_date]').forEach(checkDate);
+  updatePeopleCount();
+
+  function updateDaysPreview() {
+    const input = document.getElementById('counter-date');
+    const now = new Date();
+    const todayIso = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+    input.max = todayIso;
+    const out = document.getElementById('days-preview');
+    if (!input.value) { out.textContent = "Le nombre affiché sera calculé automatiquement à partir de cette date, et augmentera tout seul chaque jour."; return; }
+    const [y, m, d] = input.value.split('-').map(Number);
+    const days = Math.max(0, Math.round((new Date(now.getFullYear(), now.getMonth(), now.getDate()) - new Date(y, m - 1, d)) / 86400000));
+    out.textContent = `Aujourd'hui, l'écran affiche ${days.toLocaleString('fr-FR')}. Le nombre augmente tout seul chaque jour à minuit.`;
+  }
+  document.getElementById('counter-date').addEventListener('input', updateDaysPreview);
+  document.querySelectorAll('input[name=counter_mode]').forEach(r => r.addEventListener('change', sync));
+  document.querySelectorAll('input[name=type]').forEach(r => r.addEventListener('change', sync));
+  sync();
+</script>
+{% endblock %}

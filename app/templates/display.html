@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Axians – Affichage</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/theme.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/display.css') }}">
+</head>
+<body>
+  <div id="stage" class="stage">
+    <main class="content" id="content" aria-live="polite"></main>
+
+    <header class="top">
+      <img class="logo logo-dark" src="{{ url_for('static', filename='img/axians-logo-white.svg') }}" alt="Axians">
+      <img class="logo logo-light" src="{{ url_for('static', filename='img/axians-logo.svg') }}" alt="Axians">
+      <div class="clock" id="clock">
+        <span class="clock-date" id="clock-date"></span>
+        <span class="clock-time" id="clock-time">--:--</span>
+      </div>
+    </header>
+
+    <footer class="bottom">
+      <div class="segments" id="segments"></div>
+      <div class="ticker" id="ticker" hidden>
+        <span class="ticker-label">En bref</span>
+        <div class="ticker-window"><div class="ticker-track" id="ticker-track"></div></div>
+      </div>
+    </footer>
+
+    <div class="offline" id="offline" hidden>Hors ligne · contenu en cache</div>
+  </div>
+
+  <script src="{{ url_for('static', filename='js/display.js') }}"></script>
+</body>
+</html>

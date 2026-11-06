@@ -1,0 +1,31 @@
+/* Thème visuel – inspiré des couleurs du logo Axians, réinterprétées en version moderne.
+   Police : Inter (installée sur les Raspberry Pi par install-ecran.sh, paquet fonts-inter),
+   ou un fichier InterVariable.woff2 déposé dans static/fonts/. */
+@font-face {
+  font-family: "Inter";
+  font-weight: 100 900;
+  font-display: swap;
+  src: local("Inter"), local("Inter Variable"), url("../fonts/InterVariable.woff2") format("woff2");
+}
+
+:root {
+  --blue: #2F6BFF;
+  --blue-deep: #005EB8;      /* bleu du logo */
+  --magenta: #E0218A;
+  --magenta-deep: #A20067;   /* magenta du logo */
+  --cyan: #22D3EE;
+  --violet: #8B5CF6;
+  --amber: #F59E0B;
+  --coral: #FF5A5F;
+  --green: #22C55E;
+
+  --bg: #070B18;
+  --bg-2: #0D1428;
+  --text: #F4F6FB;
+  --text-dim: rgba(244, 246, 251, .68);
+  --glass: rgba(255, 255, 255, .06);
+  --glass-line: rgba(255, 255, 255, .12);
+
+  --grad: linear-gradient(100deg, #4F8BFF 0%, #A855F7 50%, #FF3D9A 100%);
+  --font: "Inter", "Segoe UI Variable Display", "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+}
