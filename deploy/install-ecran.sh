@@ -224,6 +224,9 @@ $(printf '\033[1;32m')Écran configuré.$(printf '\033[0m')
    2. Redémarrez :  sudo reboot
 $( [[ -n $SCREEN_NAME ]] && printf '   3. L’écran « %s » apparaîtra dans l’admin (section Écrans) : choisissez-y son thème.\n' "$SCREEN_NAME" )
 
+  Pour retirer l'affichage de ce Pi plus tard :
+    curl -fsSL https://raw.githubusercontent.com/garg24/comaxians/main/deploy/desinstaller.sh | bash
+
 EOF
 }
 

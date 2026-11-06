@@ -360,6 +360,7 @@ $(printf '\033[1;32m')Installation tout-en-un terminée.$(printf '\033[0m')
    - sauvegardes           : $BACKUP_DIR  (copiez-les régulièrement hors du Pi)
    - mise à jour           : curl -fsSL https://raw.githubusercontent.com/garg24/comaxians/main/install.sh | bash
                              (vos contenus sont conservés et sauvegardés juste avant)
+   - tout désinstaller     : bash $SRC_DIR/deploy/desinstaller.sh
 
 EOF
 }

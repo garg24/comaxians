@@ -192,6 +192,54 @@ Le script installe Chromium et la police Inter, désactive la mise en veille, la
 
 Options : `--server ADRESSE[:PORT]` (obligatoire), `--screen NOM`, `--full-animations`, `--resolution 720p|1080p|keep`, `--url URL` (adresse complète, usage avancé), `--dry-run`, `--help`.
 
+### Désinstaller ou réinstaller à zéro
+
+Le script `deploy/desinstaller.sh` retire tout ce que les scripts d'installation ont ajouté. Il détecte seul les rôles présents (serveur, écran ou les deux), affiche ce qu'il va supprimer et demande de taper `SUPPRIMER` pour confirmer. Il fonctionne aussi sur un Pi « écran seul ».
+
+**Désinstaller** (vos contenus sont d'abord sauvegardés dans `/var/backups/comaxians`, qui est conservé) :
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/garg24/comaxians/main/deploy/desinstaller.sh | bash
+sudo reboot
+```
+
+**Tout effacer, sauvegardes comprises** (irréversible) :
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/garg24/comaxians/main/deploy/desinstaller.sh | bash -s -- --tout
+sudo reboot
+```
+
+| Supprimé | Sans option | Avec `--tout` |
+|---|---|---|
+| Service serveur, application (`/opt/comaxians`), mot de passe et configuration | ✔ | ✔ |
+| Contenus et images (`/var/lib/comaxians`) | ✔ après sauvegarde | ✔ sans sauvegarde |
+| Outils et planification des sauvegardes, utilisateur `comaxians` | ✔ | ✔ |
+| Affichage au démarrage (kiosque), redémarrage quotidien, résolution HDMI imposée | ✔ (la mise en veille de l'écran est réactivée) | ✔ |
+| Code téléchargé (`~/comaxians`) | ✔ | ✔ |
+| Sauvegardes (`/var/backups/comaxians`) | conservées | ✔ |
+| Copies (`~/comaxians-data`, `~/comaxians.ancien-*`, `~/comaxians-pi.tar.gz`) | conservées | ✔ |
+
+Les logiciels installés (Chromium, police Inter, Python, Git…) et la taille de la mémoire d'échange restent en place : ils peuvent servir à d'autres usages du Pi.
+
+Autres options : `--serveur` (retire seulement le serveur), `--ecran` (retire seulement l'affichage), `--oui` (sans confirmation, pour un usage automatisé), `--dry-run` (simulation), `--help`.
+
+**Réinstaller à zéro**, en écrasant toute la configuration précédente (mot de passe, écrans, paramètres, contenus) : désinstallez, puis réinstallez. Le mot de passe admin est redemandé et les contenus d'exemple sont recréés.
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/garg24/comaxians/main/deploy/desinstaller.sh | bash
+curl -fsSL https://raw.githubusercontent.com/garg24/comaxians/main/install.sh | bash -s -- --screen accueil
+sudo reboot
+```
+
+Pour récupérer ensuite les contenus d'avant la réinstallation, restaurez la sauvegarde faite par la désinstallation :
+
+```bash
+sudo comaxians-restore      # liste les sauvegardes : choisissez comaxians-avant-desinstallation-…
+```
+
+Ajoutez `--tout` à la première commande pour repartir d'un Pi totalement vierge (sauvegardes comprises).
+
 ### Option B – Serveur sur une autre machine (VM, NAS…)
 
 #### 1. Le serveur
@@ -246,7 +294,8 @@ app/
   static/js/display.js   lecture de la playlist, vidéos, transitions, cache hors ligne
   static/img/            logo Axians (couleur et blanc)
   static/fonts/          police Inter (facultatif)
-deploy/                  scripts Raspberry Pi et service systemd
+deploy/                  scripts Raspberry Pi (installation serveur + écran, écran seul, désinstallation)
+                         et service systemd
 install.sh               installation / mise à jour en une commande depuis GitHub
 run.py                   lancement en production (Waitress)
 ```
