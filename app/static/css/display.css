@@ -140,7 +140,7 @@ body { font-family: var(--font); color: var(--text); -webkit-font-smoothing: ant
 /* Colonne de texte */
 .text {
   position: absolute; left: var(--m); top: 190px; bottom: 190px; width: 940px;
-  display: flex; flex-direction: column; justify-content: center; gap: 30px; z-index: 2;
+  display: flex; flex-direction: column; justify-content: center; justify-content: safe center; gap: 30px; z-index: 2;
 }
 /* Ligne d'étiquettes : surtitre + entités */
 .tags { display: flex; flex-wrap: wrap; align-items: center; gap: 14px; align-self: flex-start; }
@@ -169,11 +169,12 @@ body { font-family: var(--font); color: var(--text); -webkit-font-smoothing: ant
 }
 .title {
   font-size: 96px; line-height: 1.02; font-weight: 800; letter-spacing: -0.03em;
-  max-height: 420px; overflow: hidden; text-wrap: balance;
+  text-wrap: balance;
 }
+/* Pas de hauteur maximale : c'est display.js qui réduit le texte pour que tout tienne */
 .body {
   font-size: 34px; line-height: 1.45; font-weight: 400; color: var(--text-dim);
-  white-space: pre-line; max-height: 260px; overflow: hidden; max-width: 860px;
+  white-space: pre-line; max-width: 860px;
 }
 .grad-text {
   background: linear-gradient(100deg, var(--accent) 0%, var(--accent-2) 100%);
@@ -217,6 +218,10 @@ body { font-family: var(--font); color: var(--text); -webkit-font-smoothing: ant
 .logo-card img { max-width: 100%; max-height: 100%; object-fit: contain; }
 
 /* Événement : carte date */
+/* Les blocs de texte gardent leur taille naturelle : un manque de place devient un débordement
+   mesurable, que display.js corrige en réduisant le texte (au lieu de le couper net). */
+.text > *, .center > *, .date-card > *, .lower-third > * { flex-shrink: 0; }
+
 .date-card {
   position: absolute; right: 180px; top: 50%; width: 520px; height: 560px; margin-top: -260px;
   border-radius: 48px; display: flex; flex-direction: column; align-items: center; justify-content: center;
@@ -331,7 +336,7 @@ body { font-family: var(--font); color: var(--text); -webkit-font-smoothing: ant
 .slide-anniversaire .center,
 .slide-chiffre .center, .slide-message .center {
   position: absolute; inset: 180px var(--m); display: flex; flex-direction: column;
-  justify-content: center; align-items: center; text-align: center; gap: 26px; z-index: 2;
+  justify-content: center; justify-content: safe center; align-items: center; text-align: center; gap: 26px; z-index: 2;
 }
 .big-number { font-size: 340px; line-height: .9; font-weight: 800; letter-spacing: -0.05em; padding: 10px 20px; white-space: nowrap; }
 .big-label { font-size: 60px; font-weight: 700; letter-spacing: -0.02em; }
@@ -339,7 +344,7 @@ body { font-family: var(--font); color: var(--text); -webkit-font-smoothing: ant
 .slide-chiffre .tag, .slide-message .tag { align-self: center; }
 
 /* Message */
-.slide-message .title { font-size: 112px; max-width: 1560px; max-height: 500px; }
+.slide-message .title { font-size: 112px; max-width: 1560px; }
 .quote-mark { font-size: 260px; line-height: .5; font-weight: 800; height: 110px; margin-bottom: 10px; }
 
 /* Affiche plein écran */

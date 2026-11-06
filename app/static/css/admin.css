@@ -158,6 +158,10 @@ textarea { resize: vertical; }
 .seg-ctl input:checked + span { background: #fff; color: var(--ink); box-shadow: 0 1px 3px rgba(15,23,42,.12); }
 .seg-ctl input:focus-visible + span { outline: 3px solid rgba(47,107,255,.3); }
 
+/* Compteurs de caractères */
+.char-count { display: block; margin-top: 4px; font-size: 12px; font-weight: 400; color: var(--muted); }
+.char-count.over { color: #B45309; }
+
 /* Entités */
 .entity-pick { display: flex; gap: 8px; flex-wrap: wrap; }
 .entity-pick label { display: block; font-weight: 500; }

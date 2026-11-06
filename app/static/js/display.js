@@ -309,28 +309,64 @@
   };
 
   /* Réduit la taille de police tant que le texte déborde de sa zone */
+  /* --------------------------------------------- ajustement du texte à la place disponible
+     Chaque zone de texte (colonne, centre, carte date, bandeau vidéo) est réduite d'un même
+     facteur jusqu'à ce que tout tienne, quelle que soit la longueur des textes ou la police.
+     En dernier recours, le texte est abrégé proprement (« … ») plutôt que coupé net. */
+  const FIT_BOXES = ".text, .center, .date-card, .lower-third";
+  const FIT_TEXT = ".title, .body, .stat-value, .stat-label, .big-number, .big-label, .role, .bday-name, .date-day, .date-month, .quote-mark";
+  const READABLE_SCALE = 0.72;   // en dessous, on préfère abréger le paragraphe que rapetisser encore
+  const MIN_SCALE = 0.55;
+
+  // Débordement de la zone, mesuré sur les boîtes de mise en page : les jambages des lettres qui
+  // dépassent légèrement d'une ligne serrée (Inter, Verdana…) ne comptent pas comme un débordement.
+  function overflows(el) {
+    return el.scrollHeight > el.clientHeight + 2 || el.scrollWidth > el.clientWidth + 2;
+  }
+  function clampLines(el, lines) {
+    el.style.display = "-webkit-box";
+    el.style.webkitBoxOrient = "vertical";
+    el.style.webkitLineClamp = String(lines);
+    el.style.overflow = "hidden";
+    el.style.lineHeight = "1.18";      // laisse la place aux jambages de la dernière ligne
+  }
+  function fitBox(box) {
+    const items = [...box.querySelectorAll(FIT_TEXT)];
+    if (!items.length) return;
+    // repart des tailles prévues par la feuille de style (utile quand on réajuste après la police)
+    items.forEach((n) => {
+      n.style.fontSize = ""; n.style.display = ""; n.style.webkitLineClamp = "";
+      n.style.overflow = ""; n.style.lineHeight = "";
+    });
+    const base = items.map((n) => parseFloat(getComputedStyle(n).fontSize));
+    const bad = () => overflows(box);
+    let scale = 1;
+    const shrinkTo = (limit) => {
+      for (let i = 0; i < 20 && bad() && scale > limit; i++) {
+        scale = Math.max(limit, scale * 0.94);
+        items.forEach((n, k) => { n.style.fontSize = (base[k] * scale).toFixed(1) + "px"; });
+      }
+    };
+    const bodies = [...box.querySelectorAll(".body")];
+    const clampBodies = (minLines) => {
+      for (const n of bodies) {
+        const lh = parseFloat(getComputedStyle(n).lineHeight) || parseFloat(getComputedStyle(n).fontSize) * 1.45;
+        for (let lines = Math.round(n.offsetHeight / lh) - 1; lines >= minLines && bad(); lines--) clampLines(n, lines);
+      }
+    };
+    // 1) réduction modérée de tout le texte, qui reste lisible à distance
+    shrinkTo(READABLE_SCALE);
+    // 2) texte trop long : le paragraphe est abrégé (« … »), au moins 2 lignes gardées
+    if (bad()) clampBodies(2);
+    // 3) encore trop long : réduction supplémentaire, puis abréviation du paragraphe et du titre
+    shrinkTo(MIN_SCALE);
+    if (bad()) clampBodies(1);
+    for (const n of box.querySelectorAll(".title")) {
+      for (let lines = 3; lines >= 1 && bad(); lines--) clampLines(n, lines);
+    }
+  }
   function shrinkToFit(root) {
-    root.querySelectorAll(".title, .body, .stat-value, .big-number, .date-day").forEach((n) => {
-      const cs = getComputedStyle(n);
-      let size = parseFloat(cs.fontSize);
-      const min = size * 0.45;
-      const maxH = parseFloat(cs.maxHeight);
-      const p = n.parentElement;
-      const overflowing = () =>
-        (!isNaN(maxH) && n.scrollHeight > maxH + 4) || p.scrollWidth > p.clientWidth + 2;
-      while (overflowing() && size > min) {
-        size -= 2;
-        n.style.fontSize = size + "px";
-      }
-    });
-    root.querySelectorAll(".text, .center").forEach((col) => {
-      let guard = 30;
-      while (col.scrollHeight > col.clientHeight + 2 && guard--) {
-        col.querySelectorAll(".title, .body, .stat-value, .big-number, .big-label").forEach((n) => {
-          n.style.fontSize = parseFloat(getComputedStyle(n).fontSize) * 0.94 + "px";
-        });
-      }
-    });
+    root.querySelectorAll(FIT_BOXES).forEach(fitBox);
   }
 
   /* Libère les décodeurs vidéo (indispensable sur Raspberry Pi) */
@@ -355,6 +391,10 @@
     });
     content.append(node);
     shrinkToFit(node);
+    // La police (Inter) peut finir de se charger après le premier affichage : on réajuste alors
+    if (document.fonts && document.fonts.status !== "loaded") {
+      document.fonts.ready.then(() => { if (node.isConnected) shrinkToFit(node); });
+    }
     // Lecture des vidéos : si le son est refusé par le navigateur, on repasse en muet
     node.querySelectorAll("video").forEach((v) => {
       const p = v.play();

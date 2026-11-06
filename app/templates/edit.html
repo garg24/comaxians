@@ -27,7 +27,8 @@
       <input name="kicker" maxlength="80" value="{{ slide.kicker or '' }}">
     </label>
     <label><span id="title-label">Titre *</span>
-      <input name="title" id="title" maxlength="200" value="{{ slide.title or '' }}">
+      <input name="title" id="title" maxlength="200" value="{{ slide.title or '' }}" data-advice="60">
+      <span class="char-count" data-for="title"></span>
     </label>
     {% if ENTITIES %}
     {% set chosen = (slide.entities or '').lower().split(',') %}
@@ -44,7 +45,8 @@
     </div>
     {% endif %}
     <label class="span2">Texte <span class="muted small">(court : 2–3 lignes maximum pour rester lisible à distance)</span>
-      <textarea name="body" rows="3" maxlength="600">{{ slide.body or '' }}</textarea>
+      <textarea name="body" id="body" rows="3" maxlength="600" data-advice="180">{{ slide.body or '' }}</textarea>
+      <span class="char-count" data-for="body"></span>
     </label>
     <div class="span2 f-people">
       <div class="people-head">
@@ -216,6 +218,20 @@
     document.getElementById('title').placeholder = ph[2];
     document.getElementById('duration').placeholder = t === 'video' ? 'durée de la vidéo' : 'par défaut';
   }
+  /* --------------------------------- compteurs de caractères (lisibilité sur l'écran) */
+  document.querySelectorAll('.char-count').forEach((out) => {
+    const field = document.getElementById(out.dataset.for);
+    const advice = +field.dataset.advice;
+    const update = () => {
+      const n = field.value.trim().length;
+      out.textContent = n ? `${n} caractères – conseillé : ${advice} maximum` +
+        (n > advice ? ' · le texte sera réduit sur l\'écran, voire abrégé s\'il est très long' : '') : '';
+      out.classList.toggle('over', n > advice);
+    };
+    field.addEventListener('input', update);
+    update();
+  });
+
   /* ------------------------------------------------ liste des anniversaires */
   const peopleRows = document.getElementById('people-rows');
   const DATE_RE = /^\s*\d{1,2}\s*[\/.\-]\s*\d{1,2}\s*([\/.\-]\s*\d{2,4})?\s*$/;
