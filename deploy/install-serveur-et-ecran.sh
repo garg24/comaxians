@@ -358,7 +358,7 @@ $(printf '\033[1;32m')Installation tout-en-un terminée.$(printf '\033[0m')
    - sauvegarde immédiate  : sudo comaxians-backup
    - revenir en arrière    : sudo comaxians-restore   (liste les sauvegardes, puis restaure celle choisie)
    - sauvegardes           : $BACKUP_DIR  (copiez-les régulièrement hors du Pi)
-   - mise à jour           : copiez la nouvelle version puis relancez ce script
+   - mise à jour           : curl -fsSL https://raw.githubusercontent.com/garg24/comaxians/main/install.sh | bash
                              (vos contenus sont conservés et sauvegardés juste avant)
 
 EOF

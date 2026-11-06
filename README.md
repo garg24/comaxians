@@ -11,6 +11,14 @@ Application de communication interne qui diffuse des contenus (succès, actualit
 └──────────────────────────┘
 ```
 
+**Installation express sur un Raspberry Pi** (serveur + écran, Raspberry Pi OS Desktop avec accès Internet) :
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/garg24/comaxians/main/install.sh | bash -s -- --screen accueil
+```
+
+Détails, écrans supplémentaires et mises à jour : voir [Mise en production](#mise-en-production).
+
 ## Fonctionnalités
 
 - **10 modèles de diapositives** : Succès, Actualité, Partenaire, Événement, Employé du mois, Anniversaires, Chiffre clé, Message, Vidéo, Affiche plein écran.
@@ -33,6 +41,8 @@ Application de communication interne qui diffuse des contenus (succès, actualit
 ## Démarrage rapide (poste de test)
 
 ```bash
+git clone https://github.com/garg24/comaxians.git
+cd comaxians
 python -m venv .venv
 .venv\Scripts\pip install -r requirements.txt      # Windows
 .venv\Scripts\python run.py
@@ -55,10 +65,10 @@ Variables d'environnement :
 
 Deux scripts, selon le rôle du Raspberry Pi :
 
-| Script | Rôle du Raspberry Pi | Ce qu'il faut copier sur le Pi |
+| Script | Rôle du Raspberry Pi | Installation |
 |---|---|---|
-| `deploy/install-serveur-et-ecran.sh` | **serveur + écran** (un seul Pi de ce type) | l'archive de l'application |
-| `deploy/install-ecran.sh` | **écran seul**, relié au serveur | rien : une commande le télécharge depuis le serveur |
+| `deploy/install-serveur-et-ecran.sh` | **serveur + écran** (un seul Pi de ce type) | une commande, depuis GitHub (ou par archive sans Internet) |
+| `deploy/install-ecran.sh` | **écran seul**, relié au serveur | une commande, depuis le serveur ou depuis GitHub |
 
 Les deux scripts adaptent automatiquement les réglages au **Raspberry Pi 3 B** (animations allégées `?lite=1`, sortie HDMI 720p, mémoire d'échange 512 Mo) et gardent les réglages normaux sur Pi 4 / Pi 5. Ils acceptent `--dry-run` (simulation sans rien modifier) et `--help`.
 
@@ -66,60 +76,50 @@ Prérequis sur chaque Pi : Raspberry Pi OS **Desktop** (Bookworm ou plus récent
 
 ### Option A – Le Raspberry Pi « serveur + écran »
 
-Deux façons de récupérer l'application sur le Pi : **depuis GitHub** (le Pi a accès à Internet) ou **par une archive** copiée depuis votre PC. Le script d'installation est ensuite le même.
+#### Méthode 1 – Directement depuis GitHub (recommandée)
 
-#### Méthode 1 – Depuis GitHub (dépôt privé `garg24/comaxians`)
-
-Le dépôt étant privé, le Pi doit d'abord se connecter à votre compte GitHub. Toutes les commandes ci-dessous se lancent **sur le Raspberry Pi** (terminal ou `ssh`).
-
-**1. Installer Git et GitHub CLI**
+Sur le Raspberry Pi (terminal ou `ssh`), une seule commande télécharge l'application dans `~/comaxians` et l'installe :
 
 ```bash
-sudo apt update && sudo apt install -y git gh
+curl -fsSL https://raw.githubusercontent.com/garg24/comaxians/main/install.sh | bash -s -- --screen accueil
 ```
 
-> Si le paquet `gh` est introuvable (ancienne version de Raspberry Pi OS), suivez la procédure « Linux / Debian » de [cli.github.com](https://cli.github.com).
-
-**2. Connecter le Pi à GitHub (une fois)**
+Puis redémarrez :
 
 ```bash
-gh auth login --hostname github.com --git-protocol https --web
-```
-
-Un code à usage unique s'affiche : ouvrez **github.com/login/device** sur n'importe quel appareil, saisissez le code et autorisez « GitHub CLI ».
-
-**3. Télécharger le projet**
-
-```bash
-gh repo clone garg24/comaxians ~/comaxians
-```
-
-**4. (Facultatif) Reprendre vos contenus actuels** – ils ne sont volontairement pas sur GitHub (données personnelles). Depuis votre PC Windows :
-
-```powershell
-scp -r C:\Users\renaud.monegier\ComAxians\data pi@IP-DU-PI:~/comaxians-data
-```
-
-**5. Installer**
-
-```bash
-# avec vos contenus :
-bash ~/comaxians/deploy/install-serveur-et-ecran.sh --screen accueil --import-data ~/comaxians-data
-# ou sans (le Pi démarre avec des contenus d'exemple) :
-bash ~/comaxians/deploy/install-serveur-et-ecran.sh --screen accueil
-
 sudo reboot
 ```
 
-**Mise à jour** (après un `git push` depuis votre PC) :
+Le script demande le mot de passe de l'administration ; toutes les options de `install-serveur-et-ecran.sh` peuvent être ajoutées après `--` (voir plus bas). Sans connexion Internet sur le Pi, utilisez la méthode 2.
 
-```bash
-cd ~/comaxians && git pull && bash deploy/install-serveur-et-ecran.sh
+**Reprendre vos contenus actuels** (facultatif, à la première installation) – ils ne sont volontairement pas sur GitHub (données personnelles). Depuis le dossier du projet sur votre PC :
+
+```powershell
+scp -r data pi@IP-DU-PI:~/comaxians-data
 ```
 
-> **Sécurité** : une fois connecté, le Pi a accès à *tous* les dépôts de votre compte GitHub. Sur un appareil installé dans un lieu de passage, déconnectez-le après le téléchargement avec `gh auth logout` (il faudra refaire l'étape 2 avant chaque mise à jour).
+puis, sur le Pi, ajoutez `--import-data ~/comaxians-data` à la commande d'installation :
 
-#### Méthode 2 – Par une archive préparée sur le PC
+```bash
+curl -fsSL https://raw.githubusercontent.com/garg24/comaxians/main/install.sh | bash -s -- --screen accueil --import-data ~/comaxians-data
+```
+
+Sans cette étape, le Pi démarre avec quelques contenus d'exemple.
+
+**Mise à jour** : relancez simplement la commande (le code est mis à jour par `git pull`, vos contenus sont conservés) :
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/garg24/comaxians/main/install.sh | bash
+```
+
+Variante sans `curl | bash`, pour lire le script avant de l'exécuter :
+
+```bash
+git clone https://github.com/garg24/comaxians.git ~/comaxians
+bash ~/comaxians/deploy/install-serveur-et-ecran.sh --screen accueil
+```
+
+#### Méthode 2 – Par une archive préparée sur le PC (Pi sans Internet)
 
 **1. Sur votre PC Windows** – préparer l'archive (avec `-WithData` pour emporter vos contenus actuels) :
 
@@ -182,9 +182,15 @@ curl -fsSL http://IP-DU-SERVEUR:8080/install-ecran.sh | bash -s -- --server IP-D
 sudo reboot
 ```
 
-Le script installe Chromium et la police Inter, désactive la mise en veille, lance l'affichage en plein écran au démarrage (relance automatique en cas de plantage, une seule instance garantie) et programme un redémarrage quotidien à 4 h 30. Après le redémarrage, l'écran apparaît dans l'admin, où l'on choisit son thème.
+Le même script peut aussi être pris directement sur GitHub (utile si le serveur n'est pas encore démarré) :
 
-Options : `--server ADRESSE[:PORT]` (obligatoire), `--screen NOM`, `--full-animations`, `--resolution 720p|1080p|keep`, `--url URL` (adresse complète, usage avancé), `--dry-run`, `--help`. Le script peut aussi être copié et lancé localement : `bash install-ecran.sh --server …`.
+```bash
+curl -fsSL https://raw.githubusercontent.com/garg24/comaxians/main/deploy/install-ecran.sh | bash -s -- --server IP-DU-SERVEUR --screen hall
+```
+
+Le script installe Chromium et la police Inter, désactive la mise en veille, lance l'affichage en plein écran au démarrage (relance automatique en cas de plantage, une seule instance garantie) et programme un redémarrage quotidien à 4 h 30. Après le redémarrage, l'écran apparaît dans l'admin, où l'on choisit son thème. Pour modifier un écran (nom, résolution…), relancez la commande avec les nouvelles options.
+
+Options : `--server ADRESSE[:PORT]` (obligatoire), `--screen NOM`, `--full-animations`, `--resolution 720p|1080p|keep`, `--url URL` (adresse complète, usage avancé), `--dry-run`, `--help`.
 
 ### Option B – Serveur sur une autre machine (VM, NAS…)
 
@@ -194,7 +200,7 @@ Sur une VM Linux, un NAS ou un Raspberry Pi dédié :
 
 ```bash
 sudo useradd -r -m -d /opt/comaxians comaxians
-sudo -u comaxians git clone <dépôt> /opt/comaxians   # ou copie du dossier
+sudo -u comaxians git clone https://github.com/garg24/comaxians.git /opt/comaxians
 cd /opt/comaxians && sudo -u comaxians python3 -m venv .venv && sudo -u comaxians .venv/bin/pip install -r requirements.txt
 sudo cp deploy/comaxians.service /etc/systemd/system/   # éditez le mot de passe
 sudo systemctl daemon-reload && sudo systemctl enable --now comaxians
@@ -241,5 +247,6 @@ app/
   static/img/            logo Axians (couleur et blanc)
   static/fonts/          police Inter (facultatif)
 deploy/                  scripts Raspberry Pi et service systemd
+install.sh               installation / mise à jour en une commande depuis GitHub
 run.py                   lancement en production (Waitress)
 ```
