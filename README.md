@@ -66,6 +66,61 @@ Prérequis sur chaque Pi : Raspberry Pi OS **Desktop** (Bookworm ou plus récent
 
 ### Option A – Le Raspberry Pi « serveur + écran »
 
+Deux façons de récupérer l'application sur le Pi : **depuis GitHub** (le Pi a accès à Internet) ou **par une archive** copiée depuis votre PC. Le script d'installation est ensuite le même.
+
+#### Méthode 1 – Depuis GitHub (dépôt privé `garg24/comaxians`)
+
+Le dépôt étant privé, le Pi doit d'abord se connecter à votre compte GitHub. Toutes les commandes ci-dessous se lancent **sur le Raspberry Pi** (terminal ou `ssh`).
+
+**1. Installer Git et GitHub CLI**
+
+```bash
+sudo apt update && sudo apt install -y git gh
+```
+
+> Si le paquet `gh` est introuvable (ancienne version de Raspberry Pi OS), suivez la procédure « Linux / Debian » de [cli.github.com](https://cli.github.com).
+
+**2. Connecter le Pi à GitHub (une fois)**
+
+```bash
+gh auth login --hostname github.com --git-protocol https --web
+```
+
+Un code à usage unique s'affiche : ouvrez **github.com/login/device** sur n'importe quel appareil, saisissez le code et autorisez « GitHub CLI ».
+
+**3. Télécharger le projet**
+
+```bash
+gh repo clone garg24/comaxians ~/comaxians
+```
+
+**4. (Facultatif) Reprendre vos contenus actuels** – ils ne sont volontairement pas sur GitHub (données personnelles). Depuis votre PC Windows :
+
+```powershell
+scp -r C:\Users\renaud.monegier\ComAxians\data pi@IP-DU-PI:~/comaxians-data
+```
+
+**5. Installer**
+
+```bash
+# avec vos contenus :
+bash ~/comaxians/deploy/install-serveur-et-ecran.sh --screen accueil --import-data ~/comaxians-data
+# ou sans (le Pi démarre avec des contenus d'exemple) :
+bash ~/comaxians/deploy/install-serveur-et-ecran.sh --screen accueil
+
+sudo reboot
+```
+
+**Mise à jour** (après un `git push` depuis votre PC) :
+
+```bash
+cd ~/comaxians && git pull && bash deploy/install-serveur-et-ecran.sh
+```
+
+> **Sécurité** : une fois connecté, le Pi a accès à *tous* les dépôts de votre compte GitHub. Sur un appareil installé dans un lieu de passage, déconnectez-le après le téléchargement avec `gh auth logout` (il faudra refaire l'étape 2 avant chaque mise à jour).
+
+#### Méthode 2 – Par une archive préparée sur le PC
+
 **1. Sur votre PC Windows** – préparer l'archive (avec `-WithData` pour emporter vos contenus actuels) :
 
 ```powershell
@@ -81,9 +136,13 @@ bash ~/comaxians/deploy/install-serveur-et-ecran.sh --screen accueil
 sudo reboot
 ```
 
+**Mise à jour** : refaites l'archive, copiez-la, extrayez-la et relancez le même script.
+
+#### Ce que fait le script d'installation
+
 Le script demande le mot de passe de l'administration, puis :
 - installe le serveur dans `/opt/comaxians` comme **service systemd** démarré au boot (utilisateur dédié, données dans `/var/lib/comaxians`, mot de passe dans `/etc/comaxians.env` lisible par root seulement) ;
-- reprend vos contenus si l'archive contient `data/` (première installation uniquement) ;
+- reprend vos contenus (`--import-data DOSSIER`, ou dossier `data/` de l'archive) – première installation uniquement ;
 - configure l'écran de ce Pi en **kiosque** sur `http://localhost:8080/display` (en appelant `install-ecran.sh`) ;
 - publie le script écran à l'adresse `http://IP-DU-PI:8080/install-ecran.sh` pour équiper les autres Pi ;
 - programme une **sauvegarde quotidienne** à 3 h 30 dans `/var/backups/comaxians` (14 jours conservés) et installe les commandes `comaxians-backup` et `comaxians-restore` ;
@@ -91,7 +150,7 @@ Le script demande le mot de passe de l'administration, puis :
 
 Options : `--screen NOM`, `--full-animations`, `--resolution 720p|1080p|keep`, `--import-data DOSSIER`, `--no-import`, `--dry-run` (simulation sans rien modifier), `--help`.
 
-**Mise à jour** : refaites l'archive, copiez-la, extrayez-la et relancez le même script.
+#### Ce qui est conservé à chaque mise à jour
 
 | Élément | À la mise à jour |
 |---|---|
