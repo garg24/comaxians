@@ -51,9 +51,11 @@
 
   /* --------------------------------------------------------- mise à l'échelle */
   function fit() {
-    // Taille réellement visible (certains moteurs web Android la donnent mieux par documentElement)
-    const w = innerWidth || document.documentElement.clientWidth;
-    const h = innerHeight || document.documentElement.clientHeight;
+    // Taille réellement visible : visualViewport quand il existe (sur certains moteurs web Android,
+    // innerWidth décrit une zone de mise en page plus large que l'écran), sinon innerWidth.
+    const vv = window.visualViewport;
+    const w = (vv && vv.width) || innerWidth || document.documentElement.clientWidth;
+    const h = (vv && vv.height) || innerHeight || document.documentElement.clientHeight;
     if (!w || !h) return;
     const s = Math.min(w / 1920, h / 1080);
     stage.style.transform = `translate(${(w - 1920 * s) / 2}px, ${(h - 1080 * s) / 2}px) scale(${s})`;

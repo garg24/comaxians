@@ -124,7 +124,8 @@ class MainActivity : Activity() {
             // La page gère elle-même sa mise à l'échelle (canevas 1920 x 1080) : on respecte sa balise
             // « viewport », sans zoom ni agrandissement des polices imposé par l'accessibilité d'Android
             useWideViewPort = true
-            loadWithOverviewMode = true
+            // pas de « vue d'ensemble » : elle élargirait la zone de mise en page au contenu (1920 px)
+            loadWithOverviewMode = false
             textZoom = 100
             setSupportZoom(false)
             builtInZoomControls = false
@@ -141,11 +142,9 @@ class MainActivity : Activity() {
         w.webViewClient = object : WebViewClient() {
             override fun onPageFinished(view: WebView, url: String?) {
                 if (!mainFrameError) status.visibility = View.GONE
-                // Diagnostic : taille de la zone d'affichage vue par la page
-                view.evaluateJavascript(
-                    "JSON.stringify({w: innerWidth, h: innerHeight, dpr: devicePixelRatio, " +
-                        "ua: (navigator.userAgent.match(/Chrome\\/[\\d.]+/) || [''])[0]})"
-                ) { Log.i(TAG, "viewport $it") }
+                // Diagnostic (adb logcat -s ComAxians) : zone visible et place occupée par la diapositive
+                logViewport(view)
+                handler.postDelayed({ logViewport(view) }, 5000)
             }
 
             @Deprecated("Appelée pour la page principale sur toutes les versions d'Android")
@@ -184,6 +183,16 @@ class MainActivity : Activity() {
         loadedUrl = url
         w.loadUrl(url)
         w.requestFocus()
+    }
+
+    private fun logViewport(view: WebView) {
+        view.evaluateJavascript(
+            "(function(){var v=window.visualViewport,s=document.getElementById('stage');" +
+                "var r=s?s.getBoundingClientRect():{left:0,top:0,width:0,height:0};" +
+                "return JSON.stringify({w:innerWidth,h:innerHeight,vw:v?v.width:innerWidth,vh:v?v.height:innerHeight," +
+                "dpr:devicePixelRatio,stage:[Math.round(r.left),Math.round(r.top),Math.round(r.width),Math.round(r.height)]," +
+                "ua:(navigator.userAgent.match(/Chrome\\/[\\d.]+/)||[''])[0]});})()"
+        ) { Log.i(TAG, "viewport $it") }
     }
 
     private fun showStatus(text: String) {
