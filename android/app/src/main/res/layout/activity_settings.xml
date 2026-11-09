@@ -37,7 +37,7 @@
             android:id="@+id/server_input"
             style="@style/Champ"
             android:hint="192.168.1.20"
-            android:imeOptions="actionNext"
+            android:imeOptions="actionNext|flagNoExtractUi"
             android:inputType="textUri" />
         <TextView
             style="@style/Aide"
@@ -50,7 +50,7 @@
             android:id="@+id/screen_input"
             style="@style/Champ"
             android:hint="hall"
-            android:imeOptions="actionDone"
+            android:imeOptions="actionDone|flagNoExtractUi"
             android:inputType="text" />
         <TextView
             style="@style/Aide"

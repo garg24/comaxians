@@ -106,6 +106,7 @@ jobs:
           api-level: 34
           target: google_apis
           arch: x86_64
+          profile: tv_1080p          # écran 1920 x 1080, comme une box Android TV
           disable-animations: true
           emulator-options: -no-snapshot -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
           script: |
@@ -123,7 +124,24 @@ jobs:
             sleep 5
             adb exec-out screencap -p > 4-reglages.png
             adb shell dumpsys window | grep -E "mCurrentFocus|mFocusedApp" || true
-            adb logcat -d -s chromium:I AndroidRuntime:E > logcat.txt || true
+            adb shell wm size
+            adb shell wm density
+            adb logcat -d -s ComAxians:I chromium:W AndroidRuntime:E > logcat.txt || true
+
+      - name: La page occupe-t-elle exactement l'écran ?
+        run: |
+          cat logcat.txt
+          python - <<'PY'
+          import json, re
+          lines = [l for l in open("logcat.txt", encoding="utf-8", errors="replace") if "viewport " in l]
+          assert lines, "aucune mesure de la zone d'affichage dans logcat"
+          raw = lines[-1].split("viewport ", 1)[1].strip()
+          m = json.loads(json.loads(raw))          # evaluateJavascript renvoie une chaîne JSON encodée
+          print("zone d'affichage vue par la page :", m)
+          w, h = m["w"] * m["dpr"], m["h"] * m["dpr"]
+          print(f"en pixels de l'écran : {w:.0f} x {h:.0f}")
+          assert 1700 <= w <= 2000 and 950 <= h <= 1120, "la page ne correspond pas à l'écran 1920 x 1080"
+          PY
 
       - name: L'écran s'est-il présenté au serveur ?
         run: |

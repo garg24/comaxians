@@ -51,11 +51,18 @@
 
   /* --------------------------------------------------------- mise à l'échelle */
   function fit() {
-    const s = Math.min(innerWidth / 1920, innerHeight / 1080);
-    stage.style.transform = `translate(${(innerWidth - 1920 * s) / 2}px, ${(innerHeight - 1080 * s) / 2}px) scale(${s})`;
+    // Taille réellement visible (certains moteurs web Android la donnent mieux par documentElement)
+    const w = innerWidth || document.documentElement.clientWidth;
+    const h = innerHeight || document.documentElement.clientHeight;
+    if (!w || !h) return;
+    const s = Math.min(w / 1920, h / 1080);
+    stage.style.transform = `translate(${(w - 1920 * s) / 2}px, ${(h - 1080 * s) / 2}px) scale(${s})`;
   }
   addEventListener("resize", fit);
-  fit();
+  addEventListener("load", fit);
+  if (window.visualViewport) visualViewport.addEventListener("resize", fit);
+  // Sur certaines box, la taille définitive n'est connue qu'après le passage en plein écran
+  [0, 500, 2000].forEach((ms) => setTimeout(fit, ms));
 
   /* ------------------------------------------------------------------ horloge */
   const fmtTime = new Intl.DateTimeFormat("fr-FR", { hour: "2-digit", minute: "2-digit" });

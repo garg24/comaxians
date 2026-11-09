@@ -15,6 +15,8 @@ import android.view.ViewGroup.LayoutParams.MATCH_PARENT
 import android.view.WindowInsets
 import android.view.WindowInsetsController
 import android.view.WindowManager
+import android.util.Log
+import android.webkit.ConsoleMessage
 import android.webkit.RenderProcessGoneDetail
 import android.webkit.WebChromeClient
 import android.webkit.WebSettings
@@ -119,12 +121,31 @@ class MainActivity : Activity() {
             mediaPlaybackRequiresUserGesture = false    // vidéos lues automatiquement
             mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
             cacheMode = WebSettings.LOAD_DEFAULT
+            // La page gère elle-même sa mise à l'échelle (canevas 1920 x 1080) : on respecte sa balise
+            // « viewport », sans zoom ni agrandissement des polices imposé par l'accessibilité d'Android
+            useWideViewPort = true
+            loadWithOverviewMode = true
+            textZoom = 100
+            setSupportZoom(false)
+            builtInZoomControls = false
+            displayZoomControls = false
             userAgentString = "$userAgentString ComAxiansEcran/${Prefs.appVersion(this@MainActivity)}"
         }
-        w.webChromeClient = WebChromeClient()
+        w.webChromeClient = object : WebChromeClient() {
+            // Messages de la page (console JavaScript) visibles avec « adb logcat -s ComAxians »
+            override fun onConsoleMessage(message: ConsoleMessage): Boolean {
+                Log.i(TAG, "console: ${message.message()} (${message.sourceId()}:${message.lineNumber()})")
+                return true
+            }
+        }
         w.webViewClient = object : WebViewClient() {
             override fun onPageFinished(view: WebView, url: String?) {
                 if (!mainFrameError) status.visibility = View.GONE
+                // Diagnostic : taille de la zone d'affichage vue par la page
+                view.evaluateJavascript(
+                    "JSON.stringify({w: innerWidth, h: innerHeight, dpr: devicePixelRatio, " +
+                        "ua: (navigator.userAgent.match(/Chrome\\/[\\d.]+/) || [''])[0]})"
+                ) { Log.i(TAG, "viewport $it") }
             }
 
             @Deprecated("Appelée pour la page principale sur toutes les versions d'Android")
@@ -198,6 +219,7 @@ class MainActivity : Activity() {
     }
 
     companion object {
+        private const val TAG = "ComAxians"
         private const val FOND = 0xFF070B18.toInt()
         private const val RETRY_MS = 15_000L
     }
