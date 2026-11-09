@@ -2,7 +2,8 @@
 # =============================================================================
 # Axians – affichage dynamique : DÉSINSTALLATION d'un Raspberry Pi
 #
-# Retire ce qu'ont installé install-serveur-et-ecran.sh et/ou install-ecran.sh.
+# Retire ce qu'ont installé install-serveur-et-ecran.sh, install-serveur.sh et/ou install-ecran.sh
+# (les rôles présents sur ce Pi sont détectés automatiquement).
 #   bash desinstaller.sh          → supprime l'application ; vos contenus sont d'abord sauvegardés
 #                                   dans /var/backups/comaxians (conservé)
 #   bash desinstaller.sh --tout   → supprime AUSSI toutes les sauvegardes et copies (irréversible)
@@ -78,9 +79,12 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 (( DO_SERVER + DO_SCREEN > 0 )) || die "--serveur et --ecran sont incompatibles (sans option, les deux rôles sont retirés)"
-if [[ $EUID -eq 0 && $DRY_RUN == 0 ]]; then
-  die "lancez ce script avec l'utilisateur qui ouvre la session graphique (pas avec sudo) : il demandera sudo lui-même"
+# En root, l'écran (installé dans le dossier de l'utilisateur) serait ignoré : refusé, sauf --serveur
+if [[ $EUID -eq 0 && $DRY_RUN == 0 && $DO_SCREEN == 1 ]]; then
+  die "lancez ce script avec l'utilisateur qui ouvre la session graphique (pas avec sudo) : il demandera sudo lui-même (serveur seul installé en root : ajoutez --serveur)"
 fi
+# Root sur un système sans sudo (serveur seul sur une image minimale)
+if [[ $EUID -eq 0 ]] && ! command -v sudo >/dev/null; then sudo() { "$@"; }; fi
 
 # ------------------------------------------------------------------ détection
 HAS_SERVER=0

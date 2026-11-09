@@ -63,17 +63,20 @@ Variables d'environnement :
 
 ## Mise en production
 
-Deux scripts, selon le rôle du Raspberry Pi :
+Trois scripts, selon le rôle du Raspberry Pi :
 
 | Script | Rôle du Raspberry Pi | Installation |
 |---|---|---|
-| `deploy/install-serveur-et-ecran.sh` | **serveur + écran** (un seul Pi de ce type) | une commande, depuis GitHub (ou par archive sans Internet) |
+| `deploy/install-serveur-et-ecran.sh` | **serveur + écran** (un seul Pi de ce type) – [option A](#option-a--le-raspberry-pi--serveur--écran-) | une commande, depuis GitHub (ou par archive sans Internet) |
+| `deploy/install-serveur.sh` | **serveur seul**, sans écran sur ce Pi – [option B](#option-b--un-raspberry-pi--serveur-seul--sans-écran) | une commande, depuis GitHub (ou par archive sans Internet) |
 | `deploy/install-ecran.sh` | **écran seul**, relié au serveur | une commande, depuis le serveur ou depuis GitHub |
 | application `android/` (APK) | **écran seul** sur une **box Android** | voir [Écran sur box Android](#écran-sur-box-android--android-tv-apk) |
 
-Les deux scripts adaptent automatiquement les réglages au **Raspberry Pi 3 B** (animations allégées `?lite=1`, sortie HDMI 720p, mémoire d'échange 512 Mo) et gardent les réglages normaux sur Pi 4 / Pi 5. Ils acceptent `--dry-run` (simulation sans rien modifier) et `--help`.
+Un seul serveur suffit pour tous les écrans : choisissez l'option A **ou** l'option B, puis ajoutez autant d'écrans que nécessaire (Raspberry Pi ou box Android).
 
-Prérequis sur chaque Pi : Raspberry Pi OS **Desktop** (Bookworm ou plus récent) installé avec Raspberry Pi Imager, SSH activé, connexion automatique au bureau (`sudo raspi-config` → System Options → Auto Login → Desktop).
+Les scripts qui configurent un écran adaptent automatiquement les réglages au **Raspberry Pi 3 B** (animations allégées `?lite=1`, sortie HDMI 720p, mémoire d'échange 512 Mo) et gardent les réglages normaux sur Pi 4 / Pi 5. Tous les scripts acceptent `--dry-run` (simulation sans rien modifier) et `--help`.
+
+Prérequis sur chaque Pi qui affiche : Raspberry Pi OS **Desktop** (Bookworm ou plus récent) installé avec Raspberry Pi Imager, SSH activé, connexion automatique au bureau (`sudo raspi-config` → System Options → Auto Login → Desktop). Pour un Pi « serveur seul », Raspberry Pi OS **Lite** (sans bureau) suffit, avec SSH activé.
 
 ### Option A – Le Raspberry Pi « serveur + écran »
 
@@ -142,7 +145,7 @@ sudo reboot
 #### Ce que fait le script d'installation
 
 Le script demande le mot de passe de l'administration, puis :
-- installe le serveur dans `/opt/comaxians` comme **service systemd** démarré au boot (utilisateur dédié, données dans `/var/lib/comaxians`, mot de passe dans `/etc/comaxians.env` lisible par root seulement) ;
+- installe le serveur dans `/opt/comaxians` comme **service systemd** démarré au boot (en appelant `install-serveur.sh` ; utilisateur dédié, données dans `/var/lib/comaxians`, mot de passe dans `/etc/comaxians.env` lisible par root seulement) ;
 - reprend vos contenus (`--import-data DOSSIER`, ou dossier `data/` de l'archive) – première installation uniquement ;
 - configure l'écran de ce Pi en **kiosque** sur `http://localhost:8080/display` (en appelant `install-ecran.sh`) ;
 - publie le script écran à l'adresse `http://IP-DU-PI:8080/install-ecran.sh` pour équiper les autres Pi ;
@@ -173,6 +176,31 @@ L'état actuel est lui-même sauvegardé (`comaxians-avant-restauration-…`) av
 > Les contenus d'exemple ne sont créés qu'à la toute première installation : si vous supprimez toutes les diapositives, la liste reste vide après un redémarrage ou une mise à jour.
 
 > Pensez à réserver l'adresse IP du Pi dans votre box/routeur, et à copier de temps en temps les sauvegardes hors du Pi (`scp pi@IP-DU-PI:/var/backups/comaxians/*.tar.gz .`) : une carte SD peut lâcher.
+
+### Option B – Un Raspberry Pi « serveur seul » (sans écran)
+
+Pour héberger le serveur sur un Pi dédié (local technique, baie…) sans écran branché : tous les écrans sont alors des Raspberry Pi « écran seul » ou des box Android. Un Raspberry Pi 3 B suffit largement pour ce rôle.
+
+**Directement depuis GitHub** (recommandé) :
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/garg24/comaxians/main/install.sh | bash -s -- --serveur-seul
+```
+
+Aucun redémarrage n'est nécessaire. À la fin, le script affiche l'adresse de l'admin (`http://IP-DU-PI:8080/admin`), la commande qui équipe les Pi écrans et le lien de l'APK pour les box Android.
+
+**Par une archive** (Pi sans Internet) : préparez et copiez l'archive comme à la [méthode 2 de l'option A](#méthode-2--par-une-archive-préparée-sur-le-pc-pi-sans-internet), puis sur le Pi :
+
+```bash
+mkdir -p ~/comaxians && tar -xzf ~/comaxians-pi.tar.gz -C ~/comaxians
+bash ~/comaxians/deploy/install-serveur.sh
+```
+
+Le script installe exactement la partie serveur de l'option A : service systemd, données dans `/var/lib/comaxians`, sauvegarde quotidienne, commandes `comaxians-backup` / `comaxians-restore`, publication du script écran sur `http://IP-DU-PI:8080/install-ecran.sh`. Il ne configure aucun affichage sur ce Pi (ni navigateur, ni résolution HDMI, ni redémarrage quotidien). La reprise de vos contenus (`--import-data ~/comaxians-data`), la conservation des contenus à chaque mise à jour et la restauration fonctionnent comme pour l'option A.
+
+**Mise à jour** : relancez la même commande. Même sans `--serveur-seul`, `install.sh` reconnaît un Pi installé en « serveur seul » et ne lui ajoute pas d'écran. Pour brancher plus tard un écran sur ce même Pi : `install.sh … | bash -s -- --tout-en-un --screen accueil`.
+
+Options : `--import-data DOSSIER`, `--no-import`, `--dry-run` (simulation sans rien modifier), `--help`.
 
 ### Les autres Raspberry Pi « écran seul »
 
@@ -230,7 +258,7 @@ adb shell am start -n io.github.garg24.comaxians.ecran/.MainActivity --es server
 
 ### Désinstaller ou réinstaller à zéro
 
-Le script `deploy/desinstaller.sh` retire tout ce que les scripts d'installation ont ajouté. Il détecte seul les rôles présents (serveur, écran ou les deux), affiche ce qu'il va supprimer et demande de taper `SUPPRIMER` pour confirmer. Il fonctionne aussi sur un Pi « écran seul ».
+Le script `deploy/desinstaller.sh` retire tout ce que les scripts d'installation ont ajouté. Il détecte seul les rôles présents (serveur, écran ou les deux), affiche ce qu'il va supprimer et demande de taper `SUPPRIMER` pour confirmer. Il fonctionne aussi sur un Pi « écran seul » ou « serveur seul » (sur ce dernier, le redémarrage final est inutile).
 
 **Désinstaller** (vos contenus sont d'abord sauvegardés dans `/var/backups/comaxians`, qui est conservé) :
 
@@ -268,6 +296,8 @@ curl -fsSL https://raw.githubusercontent.com/garg24/comaxians/main/install.sh | 
 sudo reboot
 ```
 
+Pi « serveur seul » : remplacez `--screen accueil` par `--serveur-seul` (et sautez le redémarrage).
+
 Pour récupérer ensuite les contenus d'avant la réinstallation, restaurez la sauvegarde faite par la désinstallation :
 
 ```bash
@@ -276,11 +306,11 @@ sudo comaxians-restore      # liste les sauvegardes : choisissez comaxians-avant
 
 Ajoutez `--tout` à la première commande pour repartir d'un Pi totalement vierge (sauvegardes comprises).
 
-### Option B – Serveur sur une autre machine (VM, NAS…)
+### Option C – Serveur sur une autre machine (VM, NAS…)
 
 #### 1. Le serveur
 
-Sur une VM Linux, un NAS ou un Raspberry Pi dédié :
+Sur une VM Linux ou un NAS (pour un Raspberry Pi dédié, préférez l'[option B](#option-b--un-raspberry-pi--serveur-seul--sans-écran)) :
 
 ```bash
 sudo useradd -r -m -d /opt/comaxians comaxians
@@ -330,7 +360,8 @@ app/
   static/js/display.js   lecture de la playlist, vidéos, transitions, cache hors ligne
   static/img/            logo Axians (couleur et blanc)
   static/fonts/          police Inter (facultatif)
-deploy/                  scripts Raspberry Pi (installation serveur + écran, écran seul, désinstallation)
+deploy/                  scripts Raspberry Pi (installation serveur + écran, serveur seul, écran seul,
+                         désinstallation)
                          et service systemd
 install.sh               installation / mise à jour en une commande depuis GitHub
 android/                 application Android « Axians Affichage » (écran pour box Android / Android TV)
