@@ -56,7 +56,7 @@ body { font-family: var(--font); color: var(--text); -webkit-font-smoothing: ant
 
 /* ================================================================ en-tête */
 .top {
-  position: absolute; inset: 0 0 auto 0; height: 170px; z-index: 10;
+  position: absolute; /* compat inset */ top: 0; right: 0; bottom: auto; left: 0; inset: 0 0 auto 0; height: 170px; z-index: 10;
   display: flex; align-items: center; justify-content: space-between;
   padding: 0 var(--m);
   background: linear-gradient(180deg, color-mix(in srgb, var(--bg) 75%, transparent) 0%, transparent 100%);
@@ -75,9 +75,9 @@ body { font-family: var(--font); color: var(--text); -webkit-font-smoothing: ant
 .stage.no-clock .clock { display: none; }
 
 /* ================================================================ contenu */
-.content { position: absolute; inset: 0; }
+.content { position: absolute; /* compat inset */ top: 0; right: 0; bottom: 0; left: 0; inset: 0; }
 .slide {
-  position: absolute; inset: 0; overflow: hidden;
+  position: absolute; /* compat inset */ top: 0; right: 0; bottom: 0; left: 0; inset: 0; overflow: hidden;
   background: var(--bg); color: var(--text);
   --accent: var(--blue); --accent-2: var(--magenta);
 }
@@ -96,7 +96,7 @@ body { font-family: var(--font); color: var(--text); -webkit-font-smoothing: ant
 .slide-video      { --accent: #FF5A5F; --accent-2: #F59E0B; }
 
 /* Halo de couleur en arrière-plan (dégradés radiaux, peu coûteux pour le GPU du Pi) */
-.glow { position: absolute; inset: -20%; pointer-events: none; }
+.glow { position: absolute; /* compat inset */ top: -20%; right: -20%; bottom: -20%; left: -20%; inset: -20%; pointer-events: none; }
 .glow::before, .glow::after {
   content: ""; position: absolute; border-radius: 50%;
   will-change: transform;
@@ -116,7 +116,7 @@ body { font-family: var(--font); color: var(--text); -webkit-font-smoothing: ant
 
 /* Grain / grille discrète */
 .grid {
-  position: absolute; inset: 0; pointer-events: none; opacity: .5;
+  position: absolute; /* compat inset */ top: 0; right: 0; bottom: 0; left: 0; inset: 0; pointer-events: none; opacity: .5;
   background-image:
     linear-gradient(var(--grid-line) 1px, transparent 1px),
     linear-gradient(90deg, var(--grid-line) 1px, transparent 1px);
@@ -229,7 +229,7 @@ body { font-family: var(--font); color: var(--text); -webkit-font-smoothing: ant
   box-shadow: 0 40px 120px var(--shadow);
   overflow: hidden;
 }
-.date-card::before { content: ""; position: absolute; inset: 0 0 auto 0; height: 10px; background: linear-gradient(90deg, var(--accent), var(--accent-2)); }
+.date-card::before { content: ""; position: absolute; /* compat inset */ top: 0; right: 0; bottom: auto; left: 0; inset: 0 0 auto 0; height: 10px; background: linear-gradient(90deg, var(--accent), var(--accent-2)); }
 /* Avec une photo : la date devient un badge posé sur le coin bas-gauche du visuel */
 .media ~ .date-card {
   right: auto; top: auto; left: 1040px; bottom: 130px; margin-top: 0;
@@ -247,13 +247,13 @@ body { font-family: var(--font); color: var(--text); -webkit-font-smoothing: ant
   position: absolute; right: 200px; top: 50%; width: 620px; height: 620px; margin-top: -320px;
 }
 .portrait-ring {
-  position: absolute; inset: 0; border-radius: 50%;
+  position: absolute; /* compat inset */ top: 0; right: 0; bottom: 0; left: 0; inset: 0; border-radius: 50%;
   background: conic-gradient(from 210deg, var(--accent), var(--accent-2), #FFE08A, var(--accent));
   box-shadow: 0 0 140px color-mix(in srgb, var(--accent) 40%, transparent);
   animation: spin 24s linear infinite;
 }
 .portrait {
-  position: absolute; inset: 16px; border-radius: 50%; overflow: hidden;
+  position: absolute; /* compat inset */ top: 16px; right: 16px; bottom: 16px; left: 16px; inset: 16px; border-radius: 50%; overflow: hidden;
   border: 12px solid var(--bg); background: var(--bg);
 }
 .portrait img { width: 100%; height: 100%; object-fit: cover; object-position: center 25%; display: block; }
@@ -321,7 +321,7 @@ body { font-family: var(--font); color: var(--text); -webkit-font-smoothing: ant
 .balloons.right { right: 30px; animation-delay: -3s; }
 @keyframes float { from { transform: translateY(16px) rotate(-2deg); } to { transform: translateY(-18px) rotate(2deg); } }
 
-.confetti { position: absolute; inset: 0; overflow: hidden; pointer-events: none; z-index: 1; }
+.confetti { position: absolute; /* compat inset */ top: 0; right: 0; bottom: 0; left: 0; inset: 0; overflow: hidden; pointer-events: none; z-index: 1; }
 .confetti i {
   position: absolute; top: -40px; width: 14px; height: 24px; border-radius: 3px; opacity: .85;
   animation: fall linear infinite;
@@ -335,7 +335,7 @@ body { font-family: var(--font); color: var(--text); -webkit-font-smoothing: ant
 /* Chiffre clé centré */
 .slide-anniversaire .center,
 .slide-chiffre .center, .slide-message .center {
-  position: absolute; inset: 180px var(--m); display: flex; flex-direction: column;
+  position: absolute; /* compat inset */ top: 180px; right: var(--m); bottom: 180px; left: var(--m); inset: 180px var(--m); display: flex; flex-direction: column;
   justify-content: center; justify-content: safe center; align-items: center; text-align: center; gap: 26px; z-index: 2;
 }
 .big-number { font-size: 340px; line-height: .9; font-weight: 800; letter-spacing: -0.05em; padding: 10px 20px; white-space: nowrap; }
@@ -357,7 +357,7 @@ body { font-family: var(--font); color: var(--text); -webkit-font-smoothing: ant
 
 /* Vidéo plein écran */
 .slide-video { background: #000; }
-.slide-video .full { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; background: #000; }
+.slide-video .full { position: absolute; /* compat inset */ top: 0; right: 0; bottom: 0; left: 0; inset: 0; width: 100%; height: 100%; object-fit: contain; background: #000; }
 .lower-third {
   position: absolute; left: var(--m); bottom: 190px; max-width: 1100px; z-index: 3;
   padding: 30px 40px; border-radius: 28px;
@@ -371,7 +371,7 @@ body { font-family: var(--font); color: var(--text); -webkit-font-smoothing: ant
 @keyframes lt-out { to { opacity: 0; transform: translateY(20px); } }
 
 /* Écran d'attente */
-.idle { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; flex-direction: column; gap: 36px; z-index: 2; }
+.idle { position: absolute; /* compat inset */ top: 0; right: 0; bottom: 0; left: 0; inset: 0; display: flex; align-items: center; justify-content: center; flex-direction: column; gap: 36px; z-index: 2; }
 .idle img { height: 110px; }
 .idle p { font-size: 30px; color: var(--text-dim); }
 

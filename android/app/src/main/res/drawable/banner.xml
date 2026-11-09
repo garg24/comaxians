@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Bannière Android TV (320 x 180 dp) : logo blanc sur fond sombre.
+     Les marges conservent les proportions du logo (5,48 : 1). -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item>
+        <shape android:shape="rectangle">
+            <solid android:color="@color/fond" />
+            <size android:width="320dp" android:height="180dp" />
+        </shape>
+    </item>
+    <item android:left="40dp" android:right="40dp" android:top="68dp" android:bottom="68dp"
+          android:drawable="@drawable/logo_white" />
+</layer-list>

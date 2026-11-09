@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Axians Affichage</string>
+    <string name="reglages_titre">Réglages de l\'écran</string>
+    <string name="serveur">Adresse du serveur</string>
+    <string name="serveur_aide">Adresse IP du Raspberry Pi serveur, par exemple 192.168.1.20 (port 8080 par défaut)</string>
+    <string name="ecran">Nom de cet écran</string>
+    <string name="ecran_aide">Ex. : hall, cafeteria – il apparaîtra dans l\'admin (section Écrans) pour choisir son thème</string>
+    <string name="lite">Animations allégées (box peu puissante)</string>
+    <string name="demarrage">Démarrer automatiquement à l\'allumage de la box</string>
+    <string name="accueil">Utiliser comme écran d\'accueil de la box (démarrage garanti)</string>
+    <string name="tester">Tester la connexion</string>
+    <string name="enregistrer">Enregistrer et afficher</string>
+    <string name="autoriser">Autoriser le démarrage automatique (Android 10 et plus)</string>
+    <string name="parametres_android">Ouvrir les paramètres Android</string>
+    <string name="raccourcis">Télécommande : touche Retour ou Menu = ces réglages · flèche droite = diapositive suivante</string>
+</resources>

@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="fond">#070B18</color>
+    <color name="carte">#121A33</color>
+    <color name="texte">#F4F6FB</color>
+    <color name="texte_attenue">#A9B0C2</color>
+    <color name="accent">#2F6BFF</color>
+    <color name="magenta">#E0218A</color>
+</resources>

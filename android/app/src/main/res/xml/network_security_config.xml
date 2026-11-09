@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Le serveur Axians est sur le réseau local, en HTTP : on autorise les connexions non chiffrées -->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true" />
+</network-security-config>

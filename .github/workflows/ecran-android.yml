@@ -1,0 +1,165 @@
+# Compile l'application Android « Axians Affichage » (écran pour box Android / Android TV),
+# la teste sur un émulateur Android face au vrai serveur, puis publie l'APK dans la version
+# « ecran-latest » du dépôt :
+#   https://github.com/garg24/comaxians/releases/latest/download/comaxians-ecran.apk
+#
+# Signature : secrets ECRAN_KEYSTORE_B64 (clé PKCS12 en base64) et ECRAN_KEYSTORE_PASSWORD.
+# Sans ces secrets, l'APK est signée avec une clé temporaire et n'est PAS publiée (test seulement).
+name: APK écran Android
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "android/**"
+      - ".github/workflows/ecran-android.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Compilation
+    runs-on: ubuntu-latest
+    outputs:
+      signed: ${{ steps.key.outputs.signed }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.11.1"
+
+      - name: Clé de signature
+        id: key
+        env:
+          KS_B64: ${{ secrets.ECRAN_KEYSTORE_B64 }}
+        run: |
+          if [ -n "$KS_B64" ]; then
+            echo "$KS_B64" | base64 -d > "$RUNNER_TEMP/ecran.p12"
+            echo "ECRAN_KEYSTORE=$RUNNER_TEMP/ecran.p12" >> "$GITHUB_ENV"
+            echo "signed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::Secrets de signature absents : APK de test (clé temporaire), non publiée."
+            echo "signed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Compilation de l'APK
+        env:
+          ECRAN_KEYSTORE_PASSWORD: ${{ secrets.ECRAN_KEYSTORE_PASSWORD }}
+        run: gradle -p android assembleRelease --no-daemon --stacktrace
+
+      - name: Vérification de la signature
+        run: |
+          APK=android/app/build/outputs/apk/release/app-release.apk
+          BT=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
+          "$BT/apksigner" verify --print-certs "$APK"
+          "$BT/aapt2" dump badging "$APK" | head -5
+          cp "$APK" comaxians-ecran.apk
+          ls -l comaxians-ecran.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: comaxians-ecran-apk
+          path: comaxians-ecran.apk
+
+  emulator-test:
+    name: Test sur émulateur Android
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: comaxians-ecran-apk
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Démarrage du serveur Axians (contenus d'exemple)
+        run: |
+          pip install -q -r requirements.txt
+          mkdir -p "$RUNNER_TEMP/data"
+          COMAXIANS_DATA_DIR="$RUNNER_TEMP/data" COMAXIANS_ADMIN_PASSWORD=ci-test-1234 PORT=8080 \
+            nohup python run.py > "$RUNNER_TEMP/server.log" 2>&1 &
+          for i in $(seq 1 30); do curl -fs -o /dev/null http://localhost:8080/display && break; sleep 1; done
+          curl -fs http://localhost:8080/api/playlist | head -c 200; echo
+
+      - name: Activation de KVM (accélération de l'émulateur)
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Lancement de l'application sur l'émulateur
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          target: google_apis
+          arch: x86_64
+          disable-animations: true
+          emulator-options: -no-snapshot -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
+          script: |
+            adb install -r comaxians-ecran.apk
+            adb shell am start -n io.github.garg24.comaxians.ecran/.MainActivity
+            sleep 10
+            adb exec-out screencap -p > 1-premier-lancement-reglages.png
+            adb shell am start -n io.github.garg24.comaxians.ecran/.MainActivity --es server 10.0.2.2:8080 --es screen ci-android
+            sleep 30
+            adb exec-out screencap -p > 2-affichage.png
+            adb shell input keyevent KEYCODE_DPAD_RIGHT
+            sleep 5
+            adb exec-out screencap -p > 3-diapositive-suivante.png
+            adb shell input keyevent KEYCODE_BACK
+            sleep 5
+            adb exec-out screencap -p > 4-reglages.png
+            adb shell dumpsys window | grep -E "mCurrentFocus|mFocusedApp" || true
+            adb logcat -d -s chromium:I AndroidRuntime:E > logcat.txt || true
+
+      - name: L'écran s'est-il présenté au serveur ?
+        run: |
+          python - "$RUNNER_TEMP/data/comaxians.db" <<'PY'
+          import sqlite3, sys
+          rows = sqlite3.connect(sys.argv[1]).execute("select name, last_seen from screens").fetchall()
+          print("écrans vus par le serveur :", rows)
+          assert any(r[0] == "ci-android" for r in rows), "l'APK n'a pas affiché la page du serveur"
+          PY
+          grep -c "GET /display" "$RUNNER_TEMP/server.log" || true
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: captures-emulateur
+          path: |
+            *.png
+            logcat.txt
+
+  publish:
+    name: Publication de l'APK
+    needs: [build, emulator-test]
+    if: github.ref == 'refs/heads/main' && needs.build.outputs.signed == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: comaxians-ecran-apk
+
+      - name: Version « ecran-latest »
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh release delete ecran-latest --yes --cleanup-tag || true
+          gh release create ecran-latest comaxians-ecran.apk \
+            --target "$GITHUB_SHA" --latest \
+            --title "Écran Android – version 1.0.${{ github.run_number }}" \
+            --notes "Application « Axians Affichage » pour box Android / Android TV. Installation : voir le README (section « Écran sur box Android »). Lien direct : https://github.com/${{ github.repository }}/releases/latest/download/comaxians-ecran.apk"

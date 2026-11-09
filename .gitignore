@@ -6,3 +6,12 @@ app/static/fonts/*
 dist/
 # Configuration locale de l'éditeur (chemins propres à ce PC)
 .claude/
+# Application Android : fichiers de compilation et clé de signature (ne jamais publier la clé)
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+android-signing/
+*.p12
+*.jks
+*.keystore

@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Icône adaptative (Android 8 et plus) -->
+<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+    <background android:drawable="@color/fond" />
+    <foreground>
+        <inset android:drawable="@drawable/logo_white"
+               android:insetLeft="21dp" android:insetRight="21dp"
+               android:insetTop="48dp" android:insetBottom="48dp" />
+    </foreground>
+</adaptive-icon>

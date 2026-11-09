@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Icône (Android 5 à 7) : logo blanc sur fond sombre arrondi, 48 x 48 dp -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item>
+        <shape android:shape="rectangle">
+            <solid android:color="@color/fond" />
+            <corners android:radius="10dp" />
+            <size android:width="48dp" android:height="48dp" />
+        </shape>
+    </item>
+    <item android:left="6dp" android:right="6dp" android:top="20.7dp" android:bottom="20.7dp"
+          android:drawable="@drawable/logo_white" />
+</layer-list>
