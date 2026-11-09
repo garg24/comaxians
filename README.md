@@ -69,6 +69,7 @@ Deux scripts, selon le rôle du Raspberry Pi :
 |---|---|---|
 | `deploy/install-serveur-et-ecran.sh` | **serveur + écran** (un seul Pi de ce type) | une commande, depuis GitHub (ou par archive sans Internet) |
 | `deploy/install-ecran.sh` | **écran seul**, relié au serveur | une commande, depuis le serveur ou depuis GitHub |
+| application `android/` (APK) | **écran seul** sur une **box Android** | voir [Écran sur box Android](#écran-sur-box-android--android-tv-apk) |
 
 Les deux scripts adaptent automatiquement les réglages au **Raspberry Pi 3 B** (animations allégées `?lite=1`, sortie HDMI 720p, mémoire d'échange 512 Mo) et gardent les réglages normaux sur Pi 4 / Pi 5. Ils acceptent `--dry-run` (simulation sans rien modifier) et `--help`.
 
@@ -192,6 +193,41 @@ Le script installe Chromium et la police Inter, désactive la mise en veille, la
 
 Options : `--server ADRESSE[:PORT]` (obligatoire), `--screen NOM`, `--full-animations`, `--resolution 720p|1080p|keep`, `--url URL` (adresse complète, usage avancé), `--dry-run`, `--help`.
 
+### Écran sur box Android / Android TV (APK)
+
+Une box Android peut remplacer un Raspberry Pi « écran seul » grâce à l'application **Axians Affichage** (dossier `android/`). Elle affiche la page `/display` du serveur en plein écran ; le serveur, lui, reste sur le Raspberry Pi.
+
+**Télécharger l'APK** : https://github.com/garg24/comaxians/releases/latest/download/comaxians-ecran.apk
+
+**Installer sur la box**
+- avec l'application *Downloader* (Android TV) ou le navigateur de la box : ouvrez le lien ci-dessus, puis autorisez l'installation d'applications inconnues quand Android le demande ;
+- ou depuis un PC, avec ADB : `adb install comaxians-ecran.apk`.
+
+**Premier lancement** : l'écran de réglages s'ouvre (navigable à la télécommande).
+1. *Adresse du serveur* : l'adresse IP du Raspberry Pi serveur, par ex. `192.168.1.20` (port 8080 ajouté automatiquement) ;
+2. *Nom de cet écran* : par ex. `hall` – il apparaîtra dans l'admin (section Écrans) pour choisir son thème ;
+3. *Tester la connexion*, puis *Enregistrer et afficher*.
+
+Options : animations allégées (box peu puissante), démarrage automatique, mode « écran d'accueil ».
+
+**Démarrage automatique** : activé par défaut. Sur Android 10 et plus, Android bloque l'ouverture d'une application au démarrage ; deux solutions, proposées dans les réglages :
+- le bouton *Autoriser le démarrage automatique* (autorisation « afficher par-dessus les autres applications ») ;
+- ou l'option *Utiliser comme écran d'accueil* : la box ouvre l'affichage à chaque démarrage et à chaque appui sur la touche Accueil (le plus fiable sur les box dédiées).
+
+**Télécommande** : touche *Retour* ou *Menu* = réglages ; flèche droite = diapositive suivante. Les réglages se referment seuls au bout de 3 minutes.
+
+**Réglage à distance, sans télécommande** (ADB) :
+
+```bash
+adb shell am start -n io.github.garg24.comaxians.ecran/.MainActivity --es server 192.168.1.20 --es screen hall
+```
+
+**Moteur web** : l'écran utilise le moteur web d'Android (« Android System WebView »), dont la version est affichée en bas des réglages. À partir de Chrome 111, l'affichage est complet ; une version plus ancienne fonctionne avec un affichage simplifié (sans halos lumineux). Sur les box non mises à jour, installez la dernière version d'*Android System WebView* depuis le Play Store.
+
+**Mises à jour** : installez la nouvelle APK par-dessus l'ancienne, les réglages sont conservés.
+
+**Compilation** (pour information) : l'APK est fabriquée par GitHub Actions (`.github/workflows/ecran-android.yml`) à chaque modification du dossier `android/`. Elle est d'abord testée sur un émulateur Android face au vrai serveur, puis publiée sous la version `ecran-latest`. Elle est signée avec une clé conservée dans les secrets du dépôt (`ECRAN_KEYSTORE_B64`, `ECRAN_KEYSTORE_PASSWORD`). Sans ces secrets, la compilation produit une APK de test qui n'est pas publiée.
+
 ### Désinstaller ou réinstaller à zéro
 
 Le script `deploy/desinstaller.sh` retire tout ce que les scripts d'installation ont ajouté. Il détecte seul les rôles présents (serveur, écran ou les deux), affiche ce qu'il va supprimer et demande de taper `SUPPRIMER` pour confirmer. Il fonctionne aussi sur un Pi « écran seul ».
@@ -297,5 +333,7 @@ app/
 deploy/                  scripts Raspberry Pi (installation serveur + écran, écran seul, désinstallation)
                          et service systemd
 install.sh               installation / mise à jour en une commande depuis GitHub
+android/                 application Android « Axians Affichage » (écran pour box Android / Android TV)
+.github/workflows/       compilation, test sur émulateur et publication de l'APK
 run.py                   lancement en production (Waitress)
 ```

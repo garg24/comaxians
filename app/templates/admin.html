@@ -170,6 +170,14 @@
     {% endif %}
     <p class="muted small">Puis redémarrez le Pi : l'écran apparaît automatiquement dans la liste ci-dessus, où vous choisissez son thème.</p>
   </div>
+  <div class="install-box">
+    <strong>Installer un écran sur une box Android / Android TV</strong>
+    <p class="muted small">Sur la box, téléchargez et installez l'application <em>Axians Affichage</em> :
+      <a href="https://github.com/garg24/comaxians/releases/latest/download/comaxians-ecran.apk" target="_blank" rel="noopener">comaxians-ecran.apk</a>
+      (par exemple avec l'application <em>Downloader</em>). Au premier lancement, saisissez :</p>
+    <p class="muted small">• Adresse du serveur : <code>{{ request.host.split(':')[0] }}</code> &nbsp;• Nom de cet écran : au choix (ex. : hall)</p>
+    <p class="muted small">L'écran apparaît ensuite dans la liste ci-dessus. Sur la box, la touche Retour de la télécommande rouvre les réglages.</p>
+  </div>
   <p class="muted small">Adresse affichée par chaque écran : <code>{{ url_for('display', _external=True) }}?screen=<em>nom</em></code>. Sans <code>?screen=</code>, l'écran utilise le thème par défaut.</p>
   <script>
     document.getElementById('copy-cmd').addEventListener('click', async (e) => {
