@@ -269,3 +269,14 @@ textarea { resize: vertical; }
 .upd-status { margin-top: 14px; padding: 10px 14px; border-radius: 10px; background: #EEF2FF; color: #3730A3; }
 .upd-status[data-state="done"] { background: #ECFDF5; color: #047857; }
 .upd-status[data-state="error"] { background: #FFF1F2; color: #BE123C; }
+/* Arrivée depuis le lien « Mise à jour » de l'en-tête : section visible sous la barre, brièvement soulignée */
+#maj { scroll-margin-top: 90px; }
+#maj.spotlight { animation: spotlight 1.8s ease; }
+@keyframes spotlight { 0%, 40% { box-shadow: 0 0 0 3px #8B5CF6, 0 10px 30px rgba(139,92,246,.25); } 100% { box-shadow: 0 0 0 0 transparent; } }
+/* Petit écran : les liens de l'en-tête passent sous le logo, sur une ligne */
+@media (max-width: 760px) {
+  .appbar { flex-wrap: wrap; gap: 10px; padding: 12px 16px; }
+  .appbar nav { width: 100%; flex-wrap: wrap; gap: 4px; }
+  .appbar nav a { padding: 6px 10px; font-size: 14px; }
+  .appbar nav a.cta { margin-left: auto; }
+}

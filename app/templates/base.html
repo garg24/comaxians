@@ -16,6 +16,7 @@
     {% if session.admin %}
     <nav>
       <a href="{{ url_for('admin') }}">Contenus</a>
+      <a href="{{ url_for('admin') }}#maj" id="nav-update" title="Rechercher une nouvelle version de l'application">Mise à jour</a>
       <a href="{{ url_for('logout') }}">Déconnexion</a>
       <a href="{{ url_for('display') }}" target="_blank" rel="noopener" class="cta">Voir l'écran ↗</a>
     </nav>
@@ -35,6 +36,21 @@
     document.addEventListener('keydown', (e) => {
       if (e.key === 'Escape') document.querySelectorAll('details.new-content[open]').forEach((d) => { d.open = false; });
     });
+    // « Mise à jour » (en-tête) : amène à la section de mise à jour et lance la recherche
+    // (depuis une autre page, le lien ouvre la liste des contenus à cet endroit)
+    function openUpdate() {
+      const sec = document.getElementById('maj'), btn = document.getElementById('upd-check');
+      if (!sec || !btn) return false;
+      sec.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      sec.classList.remove('spotlight'); void sec.offsetWidth; sec.classList.add('spotlight');
+      btn.click();
+      return true;
+    }
+    const navUpdate = document.getElementById('nav-update');
+    if (navUpdate) navUpdate.addEventListener('click', (e) => {
+      if (openUpdate()) { e.preventDefault(); history.replaceState(null, '', '#maj'); }
+    });
+    if (location.hash === '#maj') openUpdate();
     // Confirmation en deux clics, dans la page : fonctionne même dans les navigateurs qui
     // bloquent les boîtes de dialogue (confirm() renvoie alors « Annuler » sans rien afficher).
     document.addEventListener('submit', (e) => {
