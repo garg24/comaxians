@@ -111,7 +111,9 @@ curl -fsSL https://raw.githubusercontent.com/garg24/comaxians/main/install.sh | 
 
 Sans cette étape, le Pi démarre avec 8 contenus d'exemple (personnes fictives) qui montrent chaque type de diapositive : Succès, Chiffre clé avec compteur de jours automatique, Actualité, Employé du mois, Partenaire, Événement (dans 3 semaines), Anniversaires (une personne fêtée le jour de l'installation) et Message. Modifiez-les ou supprimez-les depuis l'admin.
 
-**Mise à jour** : relancez simplement la commande (le code est mis à jour par `git pull`, vos contenus sont conservés) :
+**Mise à jour depuis l'admin** : section « Mise à jour de l'application ». Le bouton « Rechercher une mise à jour » interroge GitHub et liste les nouveautés. « Mettre à jour maintenant » télécharge puis installe la nouvelle version, sans commande à taper. Vos contenus sont conservés et une sauvegarde est faite avant. Ce bouton apparaît après une première mise à jour faite avec la commande ci-dessous. Il ne fonctionne pas pour une installation par archive.
+
+**Mise à jour en ligne de commande** : relancez simplement la commande (le code est mis à jour par `git pull`, vos contenus sont conservés) :
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/garg24/comaxians/main/install.sh | bash

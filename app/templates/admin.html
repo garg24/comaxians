@@ -109,6 +109,64 @@
   </form>
 </section>
 
+<section class="card settings" id="maj">
+  <h2>Mise à jour de l'application</h2>
+  <p class="muted small" style="margin-top:-8px">Version installée : <code>{{ version }}</code>. Les nouvelles versions sont publiées sur
+    <a href="https://github.com/garg24/comaxians" target="_blank" rel="noopener">GitHub</a>. Vos contenus, images et mot de passe sont conservés (sauvegarde automatique juste avant).</p>
+  <div class="update-row">
+    <button type="button" class="btn" id="upd-check">Rechercher une mise à jour</button>
+    <span class="muted small" id="upd-result"></span>
+  </div>
+  <ul class="muted small" id="upd-changes" hidden></ul>
+  <form method="post" action="{{ url_for('update_start') }}" id="upd-form" hidden data-confirm="Confirmer la mise à jour ?">
+    <input type="hidden" name="csrf" value="{{ csrf_token() }}">
+    <button class="btn btn-primary">Mettre à jour maintenant</button>
+    <span class="muted small">Le serveur redémarre : les écrans continuent d'afficher leurs contenus pendant ce temps.</span>
+  </form>
+  <p class="muted small" id="upd-manual" hidden>Mise à jour depuis l'admin non disponible sur ce serveur (installé avant cette fonction, ou par archive). Sur le Raspberry Pi, lancez :<br>
+    <code>curl -fsSL https://raw.githubusercontent.com/garg24/comaxians/main/install.sh | bash</code> — ensuite, ce bouton fonctionnera.</p>
+  <p class="small upd-status" id="upd-status" {% if not update_status %}hidden{% endif %}
+     data-state="{{ update_status.state if update_status else '' }}">{{ update_status.message if update_status else '' }}</p>
+  <script>
+    (() => {
+      const $ = (id) => document.getElementById(id);
+      const canUpdate = {{ 'true' if can_update else 'false' }};
+      $('upd-check').addEventListener('click', async () => {
+        $('upd-result').textContent = 'Recherche en cours…';
+        $('upd-changes').hidden = true; $('upd-form').hidden = true; $('upd-manual').hidden = true;
+        try {
+          const r = await fetch('{{ url_for("update_check") }}', { cache: 'no-store' });
+          const d = await r.json();
+          if (!r.ok) throw new Error(d.error || r.status);
+          if (!d.available) { $('upd-result').textContent = '✓ Application à jour.'; return; }
+          $('upd-result').textContent = d.count ? `${d.count} nouveauté${d.count > 1 ? 's' : ''} disponible${d.count > 1 ? 's' : ''} :` : 'Nouvelle version disponible :';
+          const ul = $('upd-changes'); ul.innerHTML = '';
+          d.changes.forEach((c) => { const li = document.createElement('li'); li.textContent = `${c.date} – ${c.message}`; ul.append(li); });
+          ul.hidden = false;
+          (d.can_update ? $('upd-form') : $('upd-manual')).hidden = false;
+        } catch (e) {
+          $('upd-result').textContent = '⚠ Vérification impossible : ' + e.message;
+        }
+      });
+      // Suivi d'une mise à jour en cours (le serveur redémarre pendant l'opération)
+      const st = $('upd-status');
+      const show = (d) => {
+        if (!d || !d.state) return;
+        st.hidden = false; st.dataset.state = d.state;
+        st.textContent = (d.state === 'done' ? '✓ ' : d.state === 'error' ? '⚠ ' : '⏳ ') + d.message;
+      };
+      async function poll() {
+        try {
+          const r = await fetch('{{ url_for("update_state") }}', { cache: 'no-store' });
+          if (r.ok) { const d = await r.json(); show(d); if (d.state === 'done') { setTimeout(() => location.reload(), 2500); return; } if (d.state === 'error') return; }
+        } catch (_) { st.textContent = '⏳ Redémarrage du serveur…'; }
+        setTimeout(poll, 3000);
+      }
+      if (['pending', 'running'].includes(st.dataset.state)) poll();
+    })();
+  </script>
+</section>
+
 <section class="card settings" id="ecrans">
   <h2>Écrans</h2>
   <p class="muted small" style="margin-top:-8px">Choisissez le thème de chaque écran. Le changement s'applique en moins d'une minute, sans intervention sur le Raspberry Pi.</p>

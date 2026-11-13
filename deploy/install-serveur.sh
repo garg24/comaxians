@@ -22,6 +22,8 @@ UNIT_FILE=/etc/systemd/system/comaxians.service
 BACKUP_BIN=/usr/local/bin/comaxians-backup
 RESTORE_BIN=/usr/local/bin/comaxians-restore
 BACKUP_DIR=/var/backups/comaxians
+UPDATE_BIN=/usr/local/bin/comaxians-update
+UPDATE_CONF=/etc/comaxians-update.conf
 SERVICE_USER=comaxians
 PORT=8080
 APK_URL=https://github.com/garg24/comaxians/releases/latest/download/comaxians-ecran.apk
@@ -173,6 +175,7 @@ done
 # -------------------------------------------------------------- vérifications
 [[ -f $SRC_DIR/run.py && -d $SRC_DIR/app ]] || die "fichiers de l'application introuvables dans $SRC_DIR (extrayez l'archive complète, puis lancez deploy/install-serveur.sh)"
 [[ -f $SRC_DIR/deploy/install-ecran.sh ]] || die "deploy/install-ecran.sh introuvable"
+[[ -f $SRC_DIR/deploy/comaxians-update.sh ]] || die "deploy/comaxians-update.sh introuvable"
 # Lancé en root sur un système sans sudo (image minimale) : les commandes sont exécutées telles quelles
 if [[ $EUID -eq 0 ]] && ! command -v sudo >/dev/null; then sudo() { "$@"; }; fi
 
@@ -237,6 +240,10 @@ run sudo rsync -a --delete --exclude '.venv' --exclude '__pycache__' \
   "$SRC_DIR/app" "$SRC_DIR/run.py" "$SRC_DIR/requirements.txt" "$APP_DIR/"
 # Le script « écran » est servi par le serveur (http://…:8080/install-ecran.sh) pour équiper les Pi écrans
 run sudo install -m 644 "$SRC_DIR/deploy/install-ecran.sh" "$APP_DIR/deploy/install-ecran.sh"
+# Version installée (commit GitHub), affichée dans l'admin pour savoir si une mise à jour existe
+VERSION=$(git -C "$SRC_DIR" rev-parse HEAD 2>/dev/null || echo "inconnue")
+printf '%s\n' "$VERSION" | write_file "$APP_DIR/VERSION" 644
+info "version installée : ${VERSION:0:7}"
 run sudo chown -R root:root "$APP_DIR"   # le service ne peut pas modifier son propre code
 
 log "[Serveur] Environnement Python"
@@ -320,6 +327,41 @@ if [[ $DRY_RUN == 0 ]]; then
     die "le serveur ne répond pas sur le port $PORT (voir le journal ci-dessus)"
   fi
   info "serveur opérationnel ✔"
+fi
+
+log "[Serveur] Bouton « Mettre à jour » de l'admin"
+# Le serveur web (sans droits) dépose une demande ; systemd lance alors la mise à jour en root
+SRC_USER=$(stat -c %U "$SRC_DIR" 2>/dev/null || id -un)
+{
+  printf '# Généré par install-serveur.sh : code source utilisé par la mise à jour depuis l'"'"'admin\n'
+  printf 'SRC_DIR=%q\nSRC_USER=%q\n' "$SRC_DIR" "$SRC_USER"
+} | write_file "$UPDATE_CONF" 644
+# « install » remplace le fichier (nouveau fichier) : sans risque même pendant une mise à jour en cours
+run sudo install -m 755 "$SRC_DIR/deploy/comaxians-update.sh" "$UPDATE_BIN"
+write_file /etc/systemd/system/comaxians-update.service 644 <<EOF
+[Unit]
+Description=Axians - mise à jour demandée depuis l'admin
+
+[Service]
+Type=oneshot
+ExecStart=$UPDATE_BIN
+TimeoutStartSec=30min
+EOF
+write_file /etc/systemd/system/comaxians-update.path 644 <<EOF
+[Unit]
+Description=Axians - surveillance des demandes de mise à jour
+
+[Path]
+PathExists=$DATA_DIR/update-request
+Unit=comaxians-update.service
+
+[Install]
+WantedBy=multi-user.target
+EOF
+run sudo systemctl daemon-reload
+run sudo systemctl enable --now comaxians-update.path
+if [[ ! -d $SRC_DIR/.git ]]; then
+  info "installation par archive : le bouton de l'admin indiquera les nouvelles versions, la mise à jour se fera à la main"
 fi
 
 if [[ $UPDATE == 0 ]]; then

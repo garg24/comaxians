@@ -17,6 +17,10 @@ import uuid
 from datetime import date, datetime, timedelta
 from functools import wraps
 from pathlib import Path
+import subprocess
+import time
+import urllib.error
+import urllib.request
 
 from flask import (Flask, abort, flash, g, jsonify, redirect, render_template,
                    request, send_from_directory, session, url_for)
@@ -505,7 +509,124 @@ def admin():
             s["waiting"] = s["live"]
             s["live"] = False
     return render_template("admin.html", slides=slides, types=SLIDE_TYPES, settings=get_settings(),
-                           screens=list_screens(), themes=THEMES, theme_icons=THEME_ICONS)
+                           screens=list_screens(), themes=THEMES, theme_icons=THEME_ICONS,
+                           version=installed_version()[:7] or "inconnue", update_status=update_status(),
+                           can_update=UPDATER_BIN.exists())
+
+
+# ------------------------------------------------------------ mise à jour depuis l'admin
+# La vérification interroge GitHub ; la mise à jour elle-même est faite par le système
+# (comaxians-update, lancé en root par systemd) : le serveur web ne fait que déposer une demande.
+GITHUB_REPO = os.environ.get("COMAXIANS_GITHUB_REPO", "garg24/comaxians")
+GITHUB_BRANCH = "main"
+UPDATER_BIN = Path(os.environ.get("COMAXIANS_UPDATER", "/usr/local/bin/comaxians-update"))
+UPDATE_REQUEST = DATA_DIR / "update-request"
+UPDATE_STATUS = DATA_DIR / "update-status.json"
+_update_cache: dict = {}
+
+
+def installed_version() -> str:
+    """Commit installé : fichier VERSION écrit par install-serveur.sh, sinon dépôt git local."""
+    f = BASE_DIR.parent / "VERSION"
+    try:
+        if f.exists():
+            v = f.read_text(encoding="utf-8").strip()
+            return v if v != "inconnue" else ""
+        if (BASE_DIR.parent / ".git").exists():
+            r = subprocess.run(["git", "-C", str(BASE_DIR.parent), "rev-parse", "HEAD"],
+                               capture_output=True, text=True, timeout=5)
+            return r.stdout.strip() if r.returncode == 0 else ""
+    except (OSError, subprocess.SubprocessError):
+        pass
+    return ""
+
+
+def _github(path: str) -> dict:
+    req = urllib.request.Request(f"https://api.github.com/repos/{GITHUB_REPO}/{path}",
+                                 headers={"Accept": "application/vnd.github+json", "User-Agent": "comaxians"})
+    with urllib.request.urlopen(req, timeout=8) as r:
+        return json.loads(r.read().decode("utf-8"))
+
+
+def _commit_info(c: dict) -> dict:
+    return {"sha": c["sha"][:7], "message": c["commit"]["message"].split("\n", 1)[0][:140],
+            "date": c["commit"]["committer"]["date"][:10]}
+
+
+def check_update() -> dict:
+    """Compare la version installée à la dernière version publiée sur GitHub (résultat gardé 5 min :
+    l'API GitHub limite le nombre de requêtes sans compte)."""
+    current = installed_version()
+    cached = _update_cache.get(current)
+    if cached and time.time() - cached[0] < 300:
+        return cached[1]
+    res = {"current": current[:7] or "inconnue", "available": False, "count": 0, "changes": [], "latest": None}
+    cmp = None
+    if len(current) == 40:
+        try:
+            cmp = _github(f"compare/{current}...{GITHUB_BRANCH}")
+        except urllib.error.HTTPError as e:
+            if e.code != 404:    # 404 : version locale inconnue de GitHub → on compare au dernier commit
+                raise
+    if cmp is not None:
+        commits = [_commit_info(c) for c in cmp.get("commits", [])][::-1]   # plus récentes d'abord
+        res |= {"available": cmp.get("ahead_by", 0) > 0, "count": cmp.get("ahead_by", 0),
+                "changes": commits[:10], "latest": commits[0] if commits else {"sha": current[:7]}}
+    else:
+        last = _commit_info(_github(f"commits/{GITHUB_BRANCH}"))
+        res |= {"latest": last, "available": not current.startswith(last["sha"]),
+                "count": None, "changes": [last]}
+    _update_cache.clear()
+    _update_cache[current] = (time.time(), res)
+    return res
+
+
+def update_status() -> dict | None:
+    try:
+        return json.loads(UPDATE_STATUS.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+
+
+def _write_status(state: str, message: str):
+    UPDATE_STATUS.write_text(json.dumps({"state": state, "message": message,
+                                         "time": datetime.now().isoformat(timespec="seconds")}), encoding="utf-8")
+
+
+@app.route("/admin/update/check")
+@login_required
+def update_check():
+    try:
+        res = check_update()
+    except (OSError, ValueError, KeyError) as e:
+        app.logger.warning("Vérification de mise à jour impossible : %s", e)
+        return jsonify({"error": "GitHub injoignable depuis le serveur (pas d'accès Internet ?)"}), 502
+    return jsonify(res | {"can_update": UPDATER_BIN.exists()})
+
+
+@app.route("/admin/update/status")
+@login_required
+def update_state():
+    return jsonify(update_status() or {})
+
+
+@app.route("/admin/update/start", methods=["POST"])
+@login_required
+def update_start():
+    if not UPDATER_BIN.exists():
+        flash("Mise à jour automatique indisponible sur ce serveur : relancez la commande d'installation "
+              "sur le Raspberry Pi (voir le README).", "error")
+        return redirect(url_for("admin") + "#maj")
+    st = update_status()
+    recent = st and st.get("time", "") > (datetime.now() - timedelta(minutes=30)).isoformat(timespec="seconds")
+    if st and st.get("state") in ("pending", "running") and recent:
+        flash("Une mise à jour est déjà en cours.", "error")
+        return redirect(url_for("admin") + "#maj")
+    _write_status("pending", "Mise à jour demandée, démarrage…")
+    UPDATE_REQUEST.write_text(datetime.now().isoformat(timespec="seconds"), encoding="utf-8")
+    _update_cache.clear()
+    flash("Mise à jour lancée : le serveur redémarre dans quelques minutes, vos contenus sont conservés.", "ok")
+    return redirect(url_for("admin") + "#maj")
 
 
 @app.route("/admin/screens", methods=["POST"])

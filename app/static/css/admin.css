@@ -261,3 +261,11 @@ textarea { resize: vertical; }
   .span2, .span3 { grid-column: auto; }
   .screen-row { grid-template-columns: 1fr; }
 }
+
+/* Mise à jour de l'application */
+.update-row { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+#upd-changes { margin: 12px 0 0 18px; display: grid; gap: 4px; }
+#upd-form { margin-top: 14px; display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+.upd-status { margin-top: 14px; padding: 10px 14px; border-radius: 10px; background: #EEF2FF; color: #3730A3; }
+.upd-status[data-state="done"] { background: #ECFDF5; color: #047857; }
+.upd-status[data-state="error"] { background: #FFF1F2; color: #BE123C; }

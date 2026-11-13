@@ -23,6 +23,10 @@ CRON_BACKUP=$P/etc/cron.d/comaxians-backup
 BACKUP_BIN=$P/usr/local/bin/comaxians-backup
 RESTORE_BIN=$P/usr/local/bin/comaxians-restore
 BACKUP_DIR=$P/var/backups/comaxians
+UPDATE_BIN=$P/usr/local/bin/comaxians-update
+UPDATE_CONF=$P/etc/comaxians-update.conf
+UPDATE_PATH_UNIT=$P/etc/systemd/system/comaxians-update.path
+UPDATE_SERVICE_UNIT=$P/etc/systemd/system/comaxians-update.service
 SERVICE_USER=comaxians
 CMDLINES=("$P/boot/firmware/cmdline.txt" "$P/boot/cmdline.txt")
 
@@ -151,7 +155,11 @@ if [[ $REMOVE_SERVER == 1 ]]; then
   if [[ -e $UNIT_FILE ]]; then
     run sudo systemctl disable --now comaxians || warn "arrêt du service impossible (déjà arrêté ?)"
   fi
-  run sudo rm -f "$UNIT_FILE" "$ENV_FILE" "$CRON_BACKUP" "$BACKUP_BIN" "$RESTORE_BIN"
+  if [[ -e $UPDATE_PATH_UNIT ]]; then
+    run sudo systemctl disable --now comaxians-update.path || true
+  fi
+  run sudo rm -f "$UNIT_FILE" "$ENV_FILE" "$CRON_BACKUP" "$BACKUP_BIN" "$RESTORE_BIN" \
+    "$UPDATE_BIN" "$UPDATE_CONF" "$UPDATE_PATH_UNIT" "$UPDATE_SERVICE_UNIT"
   run sudo systemctl daemon-reload || true
   run sudo rm -rf "$APP_DIR" "$DATA_DIR"
   if id "$SERVICE_USER" &>/dev/null; then
