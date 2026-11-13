@@ -37,6 +37,7 @@ Détails, écrans supplémentaires et mises à jour : voir [Mise en production](
 - **Bandeau défilant « En bref »**, heure et date, barre de progression.
 - **Robuste** : la playlist est mise en cache sur l'écran (continue de tourner si le réseau tombe), les modifications s'appliquent sans recharger la page, le texte trop long est réduit automatiquement, rechargement quotidien.
 - **Aperçu** de chaque diapositive depuis l'admin ; flèche droite / espace pour passer à la suivante.
+- **Dupliquer** un contenu : la copie (titre suivi de « (copie) ») est placée juste sous l'original, désactivée, et s'ouvre directement en modification ; on l'active une fois modifiée. L'image ou la vidéo est partagée avec l'original et n'est supprimée du disque que lorsque plus aucune diapositive ne l'utilise.
 
 ## Démarrage rapide (poste de test)
 

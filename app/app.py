@@ -372,6 +372,13 @@ def delete_upload(name: str):
                 app.logger.warning("Impossible de supprimer %s (fichier en cours d'utilisation)", p)
 
 
+def release_upload(db, name: str):
+    """Supprime un fichier téléversé s'il n'est plus utilisé par aucune diapositive
+    (une copie de diapositive partage l'image ou la vidéo de l'original)."""
+    if name and not db.execute("SELECT 1 FROM slides WHERE image=? LIMIT 1", (name,)).fetchone():
+        delete_upload(name)
+
+
 # ---------------------------------------------------------------- public API
 @app.route("/")
 def index():
@@ -737,13 +744,14 @@ def slide_edit(sid):
             flash(err, "error")
             return render_template("edit.html", slide=dict(row) | v, types=SLIDE_TYPES)
         if final != row["image"]:
-            delete_upload(row["image"])
             v["image"] = final
         v["updated_at"] = datetime.now().isoformat(timespec="seconds")
         v = _db_values(v)
         sets = ", ".join(f"{k}=?" for k in v)
         db.execute(f"UPDATE slides SET {sets} WHERE id=?", [*v.values(), sid])
         db.commit()
+        if final != row["image"]:
+            release_upload(db, row["image"])   # ancien visuel, sauf s'il sert encore à une copie
         flash("Diapositive enregistrée.", "ok")
         return redirect(url_for("admin"))
     return render_template("edit.html", slide=dict(row), types=SLIDE_TYPES)
@@ -755,11 +763,37 @@ def slide_delete(sid):
     db = get_db()
     row = db.execute("SELECT image FROM slides WHERE id=?", (sid,)).fetchone()
     if row:
-        delete_upload(row["image"])
         db.execute("DELETE FROM slides WHERE id=?", (sid,))
         db.commit()
+        release_upload(db, row["image"])   # le visuel reste s'il est partagé avec une copie
         flash("Diapositive supprimée.", "ok")
     return redirect(url_for("admin"))
+
+
+@app.route("/admin/slides/<int:sid>/duplicate", methods=["POST"])
+@login_required
+def slide_duplicate(sid):
+    """Crée une copie de la diapositive, placée juste après l'original. La copie est désactivée
+    (pour ne pas passer deux fois à l'écran) et s'ouvre directement en modification."""
+    db = get_db()
+    row = db.execute("SELECT * FROM slides WHERE id=?", (sid,)).fetchone()
+    if not row:
+        abort(404)
+    v = {k: row[k] for k in row.keys() if k != "id"}
+    if v["title"]:
+        v["title"] = f"{v['title']} (copie)"
+    v["active"] = 0
+    v["updated_at"] = datetime.now().isoformat(timespec="seconds")
+    # Place libérée juste après l'original : les diapositives suivantes descendent d'un cran
+    ids = [r["id"] for r in db.execute("SELECT id FROM slides ORDER BY position, id")]
+    at = ids.index(sid)
+    for pos, x in enumerate(ids):
+        db.execute("UPDATE slides SET position=? WHERE id=?", (pos if pos <= at else pos + 1, x))
+    v["position"] = at + 1
+    cur = db.execute(f"INSERT INTO slides({', '.join(v)}) VALUES ({', '.join('?' * len(v))})", list(v.values()))
+    db.commit()
+    flash("Copie créée, désactivée pour l'instant : modifiez-la, cochez « Diapositive active », puis enregistrez.", "ok")
+    return redirect(url_for("slide_edit", sid=cur.lastrowid))
 
 
 @app.route("/admin/slides/<int:sid>/reset-counter", methods=["POST"])
