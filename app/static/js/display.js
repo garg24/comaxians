@@ -2,7 +2,8 @@
  * Paramètres d'URL :
  *   screen=<nom>   n'affiche que les contenus destinés à cet écran (+ ceux destinés à tous)
  *   preview=<id>   aperçu d'une diapositive (nécessite d'être connecté à l'admin)
- *   lite=1         désactive les animations (Raspberry Pi 3 et antérieurs)
+ *   lite=1         allège l'affichage (Raspberry Pi 3 et antérieurs) : animations désactivées,
+ *                  effets coûteux retirés, fondu enchaîné plus court
  *   theme=light|dark|alternate  force un thème (sinon : réglage de l'écran dans l'admin)
  */
 (() => {
@@ -19,19 +20,30 @@
 
   const $ = (id) => document.getElementById(id);
   const stage = $("stage"), content = $("content");
-  if (params.get("lite") === "1") document.body.classList.add("lite");
+  const LITE = params.get("lite") === "1";
+  if (LITE) document.body.classList.add("lite");
+
+  /* Transitions : la diapositive suivante est préparée à l'avance (voir « transitions » plus bas) */
+  const FADE_MS = LITE ? 500 : 800;     // fondu enchaîné, plus court sur Raspberry Pi 3
+  const PREP_LEAD_MS = 2000;            // préparation de la diapositive suivante, avant son passage
+  const READY_MAX_MS = 3000;            // une image ou une vidéo lente ne bloque jamais le diaporama
+  document.documentElement.style.setProperty("--fade", FADE_MS + "ms");
+
+  let slides = [], settings = {}, version = null, pending = null;
+  let idx = -1, timer = null, prepTimer = null, current = null, prepared = null, seq = 0;
 
   /* ------------------------------------------------------------------ thèmes */
   let themeMode = "dark";   // "dark" | "light" | "alternate" (une diapositive sur deux)
   let shown = 0;            // nombre de diapositives affichées : sert à l'alternance
 
+  function themeNode(node, t) {
+    node.classList.toggle("theme-light", t === "light");
+    node.classList.toggle("theme-dark", t !== "light");
+  }
   function setSurface(t, node) {
     // node : diapositive à habiller ; l'en-tête et le pied suivent via la classe de .stage
     stage.classList.toggle("theme-light", t === "light");
-    if (node) {
-      node.classList.toggle("theme-light", t === "light");
-      node.classList.toggle("theme-dark", t !== "light");
-    }
+    if (node) themeNode(node, t);
   }
   function nextSlideTheme() {
     if (themeMode !== "alternate") return themeMode;
@@ -40,14 +52,9 @@
   function applyTheme(theme) {
     themeMode = FORCED_THEME || (THEME_MODES.includes(theme) ? theme : "dark");
     // Sans alternance, on rhabille immédiatement la diapositive en cours
-    if (themeMode !== "alternate") {
-      setSurface(themeMode, content.querySelector(".slide:not(.leaving)"));
-    }
+    if (themeMode !== "alternate") setSurface(themeMode, current);
   }
   applyTheme("");
-
-  let slides = [], settings = {}, version = null, pending = null;
-  let idx = -1, timer = null, current = null;
 
   /* --------------------------------------------------------- mise à l'échelle */
   function fit() {
@@ -173,8 +180,7 @@
     v.muted = !sound;
     v.loop = loop;
     v.playsInline = true;
-    v.autoplay = true;
-    v.preload = "auto";
+    v.preload = "auto";     // chargée pendant la préparation, lue au moment où la diapositive apparaît
     return v;
   }
 
@@ -387,32 +393,104 @@
     });
   }
 
-  function render(s) {
-    const node = el("section", `slide slide-${s.type} anim`);
+  /* ------------------------------------------------------------- transitions
+     Pour un fondu fluide, même sur Raspberry Pi 3, le changement se fait en deux temps :
+     1. préparation (environ 2 s avant le changement, pendant que l'écran est immobile) : la
+        diapositive suivante est construite, son texte ajusté, ses images décodées et sa vidéo
+        chargée. Elle est posée, quasi transparente, au-dessus de la diapositive en cours : le
+        navigateur la dessine dans son propre calque, sans que cela se voie ;
+     2. fondu : il ne reste qu'à faire monter son opacité, ce que la carte graphique fait seule. */
+  function build(s, i) {
+    const node = el("section", `slide slide-${s.type} anim entering`);
     if (s.layout === "left") node.classList.add("layout-left");   // visuel à gauche, texte à droite
     node.style.setProperty("--dur", ((s.duration || 20) + 2) + "s");
     (builders[s.type] || builders.actualite)(s).forEach((c) => node.append(c));
-    setSurface(nextSlideTheme(), node);
-    content.querySelectorAll(".slide").forEach((old) => {
-      old.classList.add("leaving");
-      old.querySelectorAll("video").forEach((v) => v.pause());
-      setTimeout(() => { releaseVideos(old); old.remove(); }, 850);
-    });
+    const theme = nextSlideTheme();
+    themeNode(node, theme);
     content.append(node);
     shrinkToFit(node);
     // La police (Inter) peut finir de se charger après le premier affichage : on réajuste alors
     if (document.fonts && document.fonts.status !== "loaded") {
       document.fonts.ready.then(() => { if (node.isConnected) shrinkToFit(node); });
     }
+    return { node, i, theme, ready: whenReady(node) };
+  }
+
+  // Image suivante dessinée par le navigateur (avec un garde-fou si la page est masquée)
+  const nextFrame = () => new Promise((r) => { requestAnimationFrame(() => r()); setTimeout(r, 500); });
+  const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+
+  function whenReady(node) {
+    const loads = [];
+    node.querySelectorAll("img").forEach((img) => { if (img.decode) loads.push(img.decode().catch(() => {})); });
+    node.querySelectorAll("video").forEach((v) => {
+      if (v.readyState < 2) {
+        loads.push(new Promise((r) => {
+          v.addEventListener("loadeddata", r, { once: true });
+          v.addEventListener("error", r, { once: true });
+        }));
+      }
+    });
+    return Promise.race([Promise.all(loads), wait(READY_MAX_MS)])
+      .then(nextFrame).then(nextFrame)
+      .then(() => (LITE ? wait(250) : null));   // le Pi 3 finit de dessiner le calque
+  }
+
+  function discardPrepared() {
+    if (!prepared) return;
+    releaseVideos(prepared.node);
+    prepared.node.remove();
+    if (themeMode === "alternate") shown--;      // l'alternance sombre / clair reste régulière
+    prepared = null;
+  }
+
+  // Prépare la diapositive d'indice i (ou réutilise celle déjà prête)
+  function prepare(i) {
+    if (prepared && prepared.i === i && prepared.node.isConnected) return prepared;
+    discardPrepared();
+    prepared = build(slides[i], i);
+    return prepared;
+  }
+
+  function upcomingIndex() {
+    let i = idx;
+    do { i = (i + 1) % slides.length; } while (!playable(slides[i]));
+    return i;
+  }
+
+  // Préparation anticipée (sauf si une nouvelle playlist doit s'appliquer au prochain changement)
+  function schedulePrep(inMs) {
+    clearTimeout(prepTimer);
+    prepTimer = setTimeout(() => {
+      if (!pending && slides.some(playable)) prepare(upcomingIndex());
+    }, Math.max(0, inMs));
+  }
+
+  function show(p) {
+    const node = p.node;
+    stage.classList.toggle("theme-light", p.theme === "light");   // en-tête et pied de page
+    const olds = [...content.querySelectorAll(".slide")].filter((o) => o !== node);
+    olds.forEach((o) => o.querySelectorAll("video").forEach((v) => v.pause()));
+    node.classList.remove("entering");
+    node.classList.add("arriving");
+    let finished = false;
+    const finish = () => {
+      if (finished) return;
+      finished = true;
+      node.classList.remove("arriving");
+      olds.forEach((o) => { releaseVideos(o); o.remove(); });
+    };
+    node.addEventListener("animationend", (e) => { if (e.target === node) finish(); });
+    setTimeout(finish, FADE_MS + 200);
     // Lecture des vidéos : si le son est refusé par le navigateur, on repasse en muet
     node.querySelectorAll("video").forEach((v) => {
-      const p = v.play();
-      if (p && p.catch) p.catch(() => { v.muted = true; v.play().catch(() => {}); });
+      const pr = v.play();
+      if (pr && pr.catch) pr.catch(() => { v.muted = true; v.play().catch(() => {}); });
     });
-    return node;
   }
 
   function renderIdle() {
+    discardPrepared();
     content.querySelectorAll(".slide").forEach((o) => { releaseVideos(o); o.remove(); });
     const d = el("section", "slide");
     setSurface(themeMode === "alternate" ? "dark" : themeMode, d);
@@ -424,6 +502,7 @@
     box.append(img, el("p", "", "Aucun contenu programmé pour le moment"));
     d.append(box);
     content.append(d);
+    current = d;
   }
 
   /* ------------------------------------------------------ indicateur de progression */
@@ -436,18 +515,20 @@
     const segs = $("segments").children;
     // Les diapositives sautées aujourd'hui (anniversaires sans personne fêtée) n'ont pas de segment
     $("segments").hidden = slides.filter(playable).length < 2;
+    // La barre avance par transformation (scaleX) et non par sa largeur : la carte graphique
+    // l'anime seule, sans recalcul de la page à chaque image (important sur Raspberry Pi)
     [...segs].forEach((s, i) => {
       s.hidden = !playable(slides[i]);
       s.classList.toggle("done", i < idx);
       const bar = s.firstChild;
       bar.style.transition = "none";
-      bar.style.width = i < idx ? "100%" : "0";
+      bar.style.transform = i < idx ? "scaleX(1)" : "scaleX(0)";
     });
     const bar = segs[idx] && segs[idx].firstChild;
     if (!bar || !ms) return;
     void bar.offsetWidth;
-    bar.style.transition = `width ${ms}ms linear`;
-    bar.style.width = "100%";
+    bar.style.transition = `transform ${ms}ms linear`;
+    bar.style.transform = "scaleX(1)";
   }
 
   /* -------------------------------------------------------------- bandeau */
@@ -485,18 +566,26 @@
     buildSegments();
   }
 
-  function next() {
+  async function next() {
     clearTimeout(timer);
-    commitPending();
+    clearTimeout(prepTimer);
+    const token = ++seq;
+    if (pending) { discardPrepared(); commitPending(); }
     if (!slides.some(playable)) {
       renderIdle();
       $("segments").hidden = true;
       timer = setTimeout(next, 10000);
       return;
     }
-    do { idx = (idx + 1) % slides.length; } while (!playable(slides[idx]));
+    // Diapositive suivante : déjà prête le plus souvent (préparée pendant la précédente)
+    const p = prepare(upcomingIndex());
+    await p.ready;
+    if (token !== seq || prepared !== p) return;   // une autre demande a pris le relais entre-temps
+    prepared = null;
+    idx = p.i;
     const s = slides[idx];
-    current = render(s);
+    current = p.node;
+    show(p);
     preload(slides.find((x, i) => i > idx && playable(x)) || slides.find(playable));
 
     const v = s.type === "video" ? current.querySelector("video.full") : null;
@@ -504,18 +593,24 @@
       // Vidéo lue jusqu'au bout : la durée réelle pilote la progression
       const node = current;
       const done = () => { if (current === node) next(); };
-      v.addEventListener("loadedmetadata", () => {
-        if (isFinite(v.duration)) startSegment(Math.max(0, (v.duration - v.currentTime) * 1000));
-      }, { once: true });
+      const onMeta = () => {
+        if (!isFinite(v.duration)) return;
+        const left = Math.max(0, (v.duration - v.currentTime) * 1000);
+        startSegment(left);
+        schedulePrep(left - PREP_LEAD_MS);
+      };
+      startSegment(0);
+      if (v.readyState >= 1) onMeta();          // durée déjà connue (vidéo chargée à l'avance)
+      else v.addEventListener("loadedmetadata", onMeta, { once: true });
       v.addEventListener("ended", done, { once: true });
       v.addEventListener("error", () => setTimeout(done, 1500), { once: true });
-      startSegment(0);
       timer = setTimeout(done, MAX_VIDEO_MS);
       return;
     }
     const ms = Math.max(4, s.duration || 12) * 1000;
     startSegment(ms);
     timer = setTimeout(next, ms);
+    schedulePrep(ms - PREP_LEAD_MS);
   }
 
   function accept(data) {

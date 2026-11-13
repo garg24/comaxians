@@ -80,11 +80,18 @@ body { font-family: var(--font); color: var(--text); -webkit-font-smoothing: ant
   position: absolute; /* compat inset */ top: 0; right: 0; bottom: 0; left: 0; inset: 0; overflow: hidden;
   background: var(--bg); color: var(--text);
   --accent: var(--blue); --accent-2: var(--magenta);
+  z-index: 2;
+  /* Chaque diapositive est dessinée une fois pour toutes dans son propre calque : le fondu
+     enchaîné ne fait alors que mélanger deux images déjà prêtes (travail de la carte graphique) */
+  will-change: opacity;
 }
-/* La diapositive sortante passe au-dessus et s'efface, révélant la suivante (fondu enchaîné) */
-.slide.leaving { animation: fade-out .8s ease forwards; z-index: 3; }
-.slide:not(.leaving) { z-index: 2; }
-@keyframes fade-out { to { opacity: 0; } }
+/* Diapositive suivante en préparation (display.js) : posée au-dessus, quasi transparente, pour que
+   le navigateur la dessine avant le fondu ; ses animations attendent qu'elle apparaisse */
+.slide.entering { z-index: 3; opacity: .001; }
+.slide.entering, .slide.entering * { animation-play-state: paused !important; }
+/* Fondu enchaîné : la nouvelle diapositive apparaît par-dessus l'ancienne */
+.slide.arriving { z-index: 3; animation: fade-in var(--fade, .8s) ease both; }
+@keyframes fade-in { from { opacity: .001; } to { opacity: 1; } }
 
 /* Couleur d'accent par type de contenu */
 .slide-succes     { --accent: #FF3D9A; --accent-2: #8B5CF6; }
@@ -403,9 +410,18 @@ body { font-family: var(--font); color: var(--text); -webkit-font-smoothing: ant
 .layout-left.anim .media { animation-name: media-in-left; }
 @keyframes media-in-left { from { opacity: 0; transform: translateX(-60px) scale(.96); } }
 
+/* ============================== mode allégé (lite=1, Raspberry Pi 3 et antérieurs)
+   Animations coupées, et suppression de ce qui coûte le plus cher à dessiner pour ces processeurs :
+   grandes ombres floues, masques, calques supplémentaires, transitions de couleur. */
 .lite .glow::before, .lite .glow::after, .lite .orb, .lite .portrait-ring, .lite .sparkle, .lite .balloons { animation: none; }
 .lite .confetti { display: none; }
 .lite .anim .a, .lite .anim .pop, .lite .anim .media { animation: none; opacity: 1; transform: none; }
+.lite .glow::before, .lite .glow::after { will-change: auto; }   /* halos fixes : pas de calque à part */
+.lite .grid { display: none; }                                     /* quadrillage très discret, mais masqué (coûteux) */
+.lite .stage { transition: none; }
+.lite .media img, .lite .media video, .lite .slide-image .poster, .lite .logo-card { box-shadow: 0 0 0 1px var(--glass-line); }
+.lite .date-card, .lite .bday-card, .lite .award, .lite .portrait-ring { box-shadow: none; }
+.lite .sparkle { text-shadow: none; }
 
 /* ========================================================= pied de page */
 .bottom {
@@ -415,8 +431,9 @@ body { font-family: var(--font); color: var(--text); -webkit-font-smoothing: ant
 }
 .segments { display: flex; gap: 10px; height: 5px; }
 .seg { flex: 1; background: var(--track); border-radius: 3px; overflow: hidden; }
-.seg i { display: block; height: 100%; width: 0; background: var(--contrast); border-radius: 3px; }
-.seg.done i { width: 100%; }
+/* Progression animée par transformation (scaleX), sans recalcul de la page : voir startSegment() */
+.seg i { display: block; height: 100%; width: 100%; background: var(--contrast); transform: scaleX(0); transform-origin: 0 50%; }
+.seg.done i { transform: scaleX(1); }
 
 .ticker { display: flex; align-items: center; gap: 22px; height: 56px; }
 .ticker-label {
