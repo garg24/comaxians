@@ -7,14 +7,14 @@
   <tr>
     {%- if v.kicker %}
     <td style="padding:0 8px 8px 0;">
-      <table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr>
+      <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="border-collapse:separate;"><tr>
         <td bgcolor="{{ c.tag_bg }}" style="background:{{ c.tag_bg }};border:1px solid {{ c.tag_line }};border-radius:999px;padding:6px 14px 6px 12px;{{ F }}font-size:13px;line-height:16px;font-weight:600;color:{{ c.text }};white-space:nowrap;"><span style="color:{{ c.accent }};">&#9679;</span>&nbsp; {{ v.kicker }}</td>
       </tr></table>
     </td>
     {%- endif %}
     {%- for e in v.entities %}
     <td style="padding:0 8px 8px 0;">
-      <table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr>
+      <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="border-collapse:separate;"><tr>
         <td bgcolor="{{ c.glass }}" style="background:{{ c.glass }};border:1px solid {{ c.line }};border-radius:999px;padding:6px 14px 6px 12px;{{ F }}font-size:13px;line-height:16px;font-weight:700;color:{{ c.text }};white-space:nowrap;"><span style="color:{{ e.color }};">&#9632;</span>&nbsp; {{ e.name }}</td>
       </tr></table>
     </td>
@@ -42,7 +42,8 @@
 <!--[if mso]><style>table, td, div, p, h1 { font-family: Segoe UI, Arial, sans-serif !important; }</style><![endif]-->
 <style>
   body { margin: 0; padding: 0; width: 100% !important; -webkit-text-size-adjust: 100%; }
-  table { border-collapse: collapse; }
+  /* « separate » (et non « collapse ») : sinon les bordures des cases restent carrées (pastilles, carte) */
+  table { border-collapse: separate; border-spacing: 0; mso-table-lspace: 0pt; mso-table-rspace: 0pt; }
   img { border: 0; outline: none; text-decoration: none; -ms-interpolation-mode: bicubic; }
   @media screen and (max-width: 620px) {
     .wrap { width: 100% !important; }
@@ -59,7 +60,7 @@
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="{{ c.page }}" style="background:{{ c.page }};">
 <tr><td align="center" style="padding:28px 10px 36px;">
 <!--[if mso]><table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0"><tr><td><![endif]-->
-<table role="presentation" class="wrap" width="600" cellpadding="0" cellspacing="0" border="0" style="width:600px;max-width:600px;">
+<table role="presentation" class="wrap" width="600" cellpadding="0" cellspacing="0" border="0" style="width:600px;max-width:600px;border-collapse:separate;">
 
   {#- En-tête : logo et date, comme le haut des écrans #}
   <tr><td style="padding:0 4px 16px;">
@@ -89,7 +90,7 @@
     {%- elif v.has_video %}
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
       <td align="center" bgcolor="{{ c.tag_bg }}" style="background:{{ c.tag_bg }};padding:44px 20px 40px;">
-        <table role="presentation" cellpadding="0" cellspacing="0" border="0" align="center"><tr>
+        <table role="presentation" cellpadding="0" cellspacing="0" border="0" align="center" style="border-collapse:separate;"><tr>
           <td align="center" valign="middle" width="64" height="64" bgcolor="{{ c.accent }}" style="width:64px;height:64px;border-radius:32px;background:{{ c.accent }};{{ F }}font-size:24px;line-height:64px;color:#FFFFFF;">&#9654;</td>
         </tr></table>
         <p style="margin:14px 0 0;{{ F }}font-size:14px;line-height:20px;font-weight:600;color:{{ c.text }};">Vidéo à découvrir sur les écrans d'affichage</p>
@@ -102,7 +103,7 @@
 
     {%- if v.type == 'partenaire' %}
       {%- if media %}
-      <table role="presentation" cellpadding="0" cellspacing="0" border="0" align="center" style="margin:0 auto 26px;"><tr>
+      <table role="presentation" cellpadding="0" cellspacing="0" border="0" align="center" style="margin:0 auto 26px;border-collapse:separate;"><tr>
         <td align="center" bgcolor="#FFFFFF" style="background:#FFFFFF;border:1px solid {{ c.line }};border-radius:18px;padding:24px 32px;">
           <img src="{{ media.src }}" width="{{ media.w or 200 }}"{% if media.h %} height="{{ media.h }}"{% endif %} alt="{{ v.title }}" style="display:block;max-width:260px;height:auto;">
         </td>
@@ -116,7 +117,7 @@
       <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
         {%- if v.highlight %}
         <td class="stack stack-gap" width="128" valign="top" style="width:128px;padding-right:26px;">
-          <table role="presentation" width="128" cellpadding="0" cellspacing="0" border="0" style="width:128px;">
+          <table role="presentation" width="128" cellpadding="0" cellspacing="0" border="0" style="width:128px;border-collapse:separate;">
             <tr><td height="6" bgcolor="{{ c.accent }}" style="height:6px;font-size:0;line-height:0;background:{{ c.accent }};background-image:linear-gradient(90deg,{{ c.accent }},{{ c.accent2 }});border-radius:16px 16px 0 0;">&nbsp;</td></tr>
             <tr><td align="center" bgcolor="{{ c.glass }}" style="background:{{ c.glass }};border:1px solid {{ c.line }};border-top:0;border-radius:0 0 16px 16px;padding:14px 6px 16px;">
               <div class="big" style="{{ F }}font-size:56px;line-height:60px;font-weight:800;letter-spacing:-2px;color:{{ c.accent_text }};">{{ v.highlight }}</div>
@@ -140,12 +141,12 @@
           {%- if media %}
           <img src="{{ media.src }}" width="180" height="180" alt="{{ v.title }}" style="display:block;width:180px;height:180px;{% if not media.w %}border-radius:90px;object-fit:cover;{% endif %}">
           {%- else %}
-          <table role="presentation" cellpadding="0" cellspacing="0" border="0" align="center"><tr>
+          <table role="presentation" cellpadding="0" cellspacing="0" border="0" align="center" style="border-collapse:separate;"><tr>
             <td align="center" valign="middle" width="150" height="150" bgcolor="{{ c.accent }}" style="width:150px;height:150px;border-radius:75px;background:{{ c.accent }};background-image:linear-gradient(135deg,{{ c.accent }},{{ c.accent2 }});{{ F }}font-size:54px;line-height:150px;font-weight:800;color:#FFFFFF;">{{ v.initials or '★' }}</td>
           </tr></table>
           {%- endif %}
           {%- if v.highlight %}
-          <table role="presentation" cellpadding="0" cellspacing="0" border="0" align="center" style="margin:14px auto 0;"><tr>
+          <table role="presentation" cellpadding="0" cellspacing="0" border="0" align="center" style="margin:14px auto 0;border-collapse:separate;"><tr>
             <td bgcolor="{{ c.contrast }}" style="background:{{ c.contrast }};border-radius:999px;padding:8px 18px;{{ F }}font-size:14px;line-height:18px;font-weight:800;color:{{ c.contrast_text }};white-space:nowrap;">&#9733; {{ v.highlight }}</td>
           </tr></table>
           {%- endif %}
@@ -183,7 +184,7 @@
       {{ title(v, c, F) }}
       {{ body(v, c, F) }}
       {%- if v.highlight and v.type in ('succes', 'actualite') %}
-      <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin-top:22px;"><tr>
+      <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin-top:22px;border-collapse:separate;"><tr>
         <td bgcolor="{{ c.glass }}" style="background:{{ c.glass }};border:1px solid {{ c.line }};border-radius:18px;padding:14px 22px 14px 20px;">
           <table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr>
             <td valign="middle" style="{{ F }}font-size:40px;line-height:46px;font-weight:800;letter-spacing:-1px;color:{{ c.accent_text }};white-space:nowrap;">{{ v.highlight }}</td>
