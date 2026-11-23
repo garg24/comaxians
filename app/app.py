@@ -11,6 +11,7 @@ import calendar
 import hashlib
 import json
 import os
+import re
 import secrets
 import sqlite3
 import uuid
@@ -510,7 +511,7 @@ def admin():
             s["live"] = False
     return render_template("admin.html", slides=slides, types=SLIDE_TYPES, settings=get_settings(),
                            screens=list_screens(), themes=THEMES, theme_icons=THEME_ICONS,
-                           version=installed_version()[:7] or "inconnue", update_status=update_status(),
+                           version=installed_version()[:7] or "inconnue", update_status=update_progress(),
                            can_update=UPDATER_BIN.exists())
 
 
@@ -522,7 +523,9 @@ GITHUB_BRANCH = "main"
 UPDATER_BIN = Path(os.environ.get("COMAXIANS_UPDATER", "/usr/local/bin/comaxians-update"))
 UPDATE_REQUEST = DATA_DIR / "update-request"
 UPDATE_STATUS = DATA_DIR / "update-status.json"
+UPDATE_LOG = DATA_DIR / "update.log"
 _update_cache: dict = {}
+_ANSI = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]")
 
 
 def installed_version() -> str:
@@ -588,6 +591,40 @@ def update_status() -> dict | None:
         return None
 
 
+def _log_tail(lines: int = 12) -> list[str]:
+    """Dernières lignes du journal de mise à jour, sans les codes couleur du terminal."""
+    try:
+        with UPDATE_LOG.open("rb") as f:
+            start = max(0, f.seek(0, os.SEEK_END) - 6000)
+            f.seek(start)
+            raws = f.read().decode("utf-8", "replace").split("\n")[1 if start else 0:]   # 1re ligne tronquée
+    except OSError:
+        return []
+    out = []
+    for raw in raws:
+        # \r au milieu d'une ligne : progression réécrite sur place (apt…) → on garde l'état final
+        line = _ANSI.sub("", raw.rstrip("\r").rsplit("\r", 1)[-1]).rstrip()
+        if line.strip():
+            out.append(line[:220])
+    return out[-lines:]
+
+
+def update_progress() -> dict:
+    """État de la mise à jour pour l'admin : étape, pourcentage, durées (horloge du serveur), journal."""
+    st = update_status() or {}
+    if not st.get("state"):
+        return {}
+    now = datetime.now()
+    for key, out in (("started", "elapsed"), ("time", "step_elapsed")):
+        try:
+            st[out] = max(0, int((now - datetime.fromisoformat(st[key])).total_seconds()))
+        except (KeyError, TypeError, ValueError):
+            pass
+    if st["state"] != "done":
+        st["log"] = _log_tail()
+    return st
+
+
 def _write_status(state: str, message: str):
     UPDATE_STATUS.write_text(json.dumps({"state": state, "message": message,
                                          "time": datetime.now().isoformat(timespec="seconds")}), encoding="utf-8")
@@ -607,7 +644,7 @@ def update_check():
 @app.route("/admin/update/status")
 @login_required
 def update_state():
-    return jsonify(update_status() or {})
+    return jsonify(update_progress())
 
 
 @app.route("/admin/update/start", methods=["POST"])

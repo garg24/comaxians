@@ -141,13 +141,20 @@
   </form>
   <p class="muted small" id="upd-manual" hidden>Mise à jour depuis l'admin non disponible sur ce serveur (installé avant cette fonction, ou par archive). Sur le Raspberry Pi, lancez :<br>
     <code>curl -fsSL https://raw.githubusercontent.com/garg24/comaxians/main/install.sh | bash</code> — ensuite, ce bouton fonctionnera.</p>
-  <p class="small upd-status" id="upd-status" {% if not update_status %}hidden{% endif %}
-     data-state="{{ update_status.state if update_status else '' }}">{{ update_status.message if update_status else '' }}</p>
+  <div class="small upd-status" id="upd-status" hidden aria-live="polite"
+       data-state="{{ update_status.state if update_status else '' }}">
+    <div class="upd-head"><strong id="upd-msg"></strong><span id="upd-time"></span></div>
+    <div class="upd-bar" id="upd-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100"
+         aria-label="Avancement de la mise à jour" hidden><span><i></i></span></div>
+    <ol class="upd-steps" id="upd-steps" hidden></ol>
+    <details class="upd-log" id="upd-log-box" hidden><summary>Journal détaillé</summary><pre id="upd-log"></pre></details>
+  </div>
   <script>
     (() => {
       const $ = (id) => document.getElementById(id);
       const canUpdate = {{ 'true' if can_update else 'false' }};
       $('upd-check').addEventListener('click', async () => {
+        if (['pending', 'running'].includes(st.dataset.state)) return;   // mise à jour déjà en cours
         $('upd-result').textContent = 'Recherche en cours…';
         $('upd-changes').hidden = true; $('upd-form').hidden = true; $('upd-manual').hidden = true;
         try {
@@ -164,21 +171,71 @@
           $('upd-result').textContent = '⚠ Vérification impossible : ' + e.message;
         }
       });
-      // Suivi d'une mise à jour en cours (le serveur redémarre pendant l'opération)
+      // Suivi d'une mise à jour : étapes, barre d'avancement, durée, journal.
+      // Le serveur redémarre pendant l'opération : on garde alors le dernier état connu.
       const st = $('upd-status');
-      const show = (d) => {
-        if (!d || !d.state) return;
-        st.hidden = false; st.dataset.state = d.state;
-        st.textContent = (d.state === 'done' ? '✓ ' : d.state === 'error' ? '⚠ ' : '⏳ ') + d.message;
-      };
+      let cur = {{ (update_status or {}) | tojson }};
+      let received = Date.now(), offline = false, watching = false;
+      const active = () => ['pending', 'running'].includes(cur.state);
+      const duration = (s) => s < 60 ? `${s} s` : `${Math.floor(s / 60)} min ${String(s % 60).padStart(2, '0')} s`;
+
+      function percent(since) {
+        if (cur.state === 'done') return 100;
+        if (cur.percent == null) return 2;
+        if (cur.state === 'error') return cur.percent;
+        // À l'intérieur d'une étape, la barre avance doucement vers le début de la suivante sans l'atteindre
+        const from = cur.percent, to = cur.next_percent ?? from;
+        const t = (cur.step_elapsed || 0) + since;
+        return from + (to - from) * 0.9 * (1 - Math.exp(-t / Math.max(5, (to - from) * 1.5)));
+      }
+
+      function render() {
+        const d = cur;
+        st.dataset.state = d.state || '';
+        if (!d.state) { st.hidden = true; return; }
+        st.hidden = false;
+        const since = active() ? Math.round((Date.now() - received) / 1000) : 0;
+        const live = active() || (watching && d.state === 'done');
+        $('upd-msg').textContent = (d.state === 'done' ? '✓ ' : d.state === 'error' ? '⚠ ' : '') + d.message;
+        $('upd-time').textContent =
+          active() && (d.elapsed ?? d.step_elapsed) != null ? `depuis ${duration((d.elapsed ?? d.step_elapsed) + since)}${offline ? ' · serveur en cours de redémarrage, reconnexion…' : ''}`
+          : d.state === 'done' && d.time ? `le ${d.time.slice(8, 10)}/${d.time.slice(5, 7)} à ${d.time.slice(11, 16)}` : '';
+        const bar = $('upd-bar'), p = Math.min(100, percent(since));
+        bar.hidden = !(live || d.state === 'error');
+        bar.querySelector('i').style.width = p + '%';
+        bar.dataset.pct = Math.floor(p) + ' %';
+        bar.setAttribute('aria-valuenow', Math.floor(p));
+        const steps = d.steps || [], ol = $('upd-steps');
+        ol.hidden = !steps.length || !(live || d.state === 'error');
+        ol.replaceChildren(...steps.map((label, i) => {
+          const li = document.createElement('li'), n = i + 1;
+          li.className = d.state === 'done' || n < d.step ? 'done' : n > d.step ? 'todo' : d.state === 'error' ? 'error' : 'current';
+          li.textContent = label;
+          return li;
+        }));
+        const box = $('upd-log-box'), pre = $('upd-log'), lines = d.log || [];
+        box.hidden = !lines.length || d.state === 'done';
+        pre.textContent = lines.join('\n');
+        pre.scrollTop = pre.scrollHeight;
+        if (d.state === 'error' && !box.dataset.shown) { box.open = true; box.dataset.shown = '1'; }   // aide au diagnostic
+        $('upd-check').disabled = active();
+      }
+
       async function poll() {
+        watching = true;
         try {
           const r = await fetch('{{ url_for("update_state") }}', { cache: 'no-store' });
-          if (r.ok) { const d = await r.json(); show(d); if (d.state === 'done') { setTimeout(() => location.reload(), 2500); return; } if (d.state === 'error') return; }
-        } catch (_) { st.textContent = '⏳ Redémarrage du serveur…'; }
-        setTimeout(poll, 3000);
+          const d = await r.json();   // pendant le redémarrage : erreur réseau ou page d'erreur
+          if (d.state) { cur = d; received = Date.now(); }
+          offline = false;
+        } catch (_) { offline = true; }
+        render();
+        if (cur.state === 'done') { setTimeout(() => location.reload(), 2500); return; }
+        if (cur.state !== 'error') setTimeout(poll, 2000);
       }
-      if (['pending', 'running'].includes(st.dataset.state)) poll();
+
+      render();
+      if (active()) { poll(); setInterval(() => { if (active()) render(); }, 1000); }
     })();
   </script>
 </section>
