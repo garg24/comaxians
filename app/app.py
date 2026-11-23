@@ -941,17 +941,19 @@ def slide_toggle(sid):
 @app.route("/admin/slides/<int:sid>/move/<direction>", methods=["POST"])
 @login_required
 def slide_move(sid, direction):
+    """Déplace un contenu d'un cran (up / down) ou tout en haut / tout en bas (first / last)."""
     db = get_db()
     ids = [r["id"] for r in db.execute("SELECT id FROM slides ORDER BY position, id")]
     if sid in ids:
         i = ids.index(sid)
-        j = i - 1 if direction == "up" else i + 1
-        if 0 <= j < len(ids):
-            ids[i], ids[j] = ids[j], ids[i]
+        j = {"up": i - 1, "down": i + 1, "first": 0, "last": len(ids) - 1}.get(direction, i)
+        if 0 <= j < len(ids) and j != i:
+            ids.insert(j, ids.pop(i))
             for pos, x in enumerate(ids):
                 db.execute("UPDATE slides SET position=? WHERE id=?", (pos, x))
             db.commit()
-    return redirect(url_for("admin"))
+    # La liste se rouvre sur le contenu déplacé (cf. admin.html), pas en haut de la page
+    return redirect(url_for("admin") + f"#moved-{sid}")
 
 
 @app.route("/admin/settings", methods=["POST"])

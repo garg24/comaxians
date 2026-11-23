@@ -116,6 +116,15 @@ a.chip:hover { border-color: var(--c); }
 .clamp { margin: 2px 0 0; display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; overflow: hidden; }
 .actions { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
 .actions form { margin: 0; }
+/* Ordre de passage : carré 2×2 (⤒ ↑ / ⤓ ↓) pour ne pas élargir la colonne des boutons */
+.move { display: grid; grid-template-columns: repeat(2, 30px); gap: 4px; margin-right: 6px; }
+.move .icon { width: 30px; height: 30px; font-size: 15px; }
+.move form:nth-child(1) { grid-area: 1 / 1; }
+.move form:nth-child(2) { grid-area: 1 / 2; }
+.move form:nth-child(3) { grid-area: 2 / 2; }
+.move form:nth-child(4) { grid-area: 2 / 1; }
+.row { scroll-margin: 90px 0 16px; }
+.row.just-moved { animation: spotlight 1.6s ease; }
 .empty { text-align: center; color: var(--muted); }
 
 label { display: block; font-weight: 600; font-size: 14px; }
@@ -252,6 +261,8 @@ textarea { resize: vertical; }
 @media (max-width: 1180px) {
   .row { grid-template-columns: 120px minmax(0, 1fr); }
   .actions { grid-column: 2; justify-content: flex-start; }
+  .move { display: flex; }   /* boutons sous le texte : la place ne manque pas, ⤒ ↑ ↓ ⤓ en ligne */
+  .move .icon { width: 34px; height: 34px; font-size: 16px; }
 }
 @media (max-width: 860px) {
   .row { grid-template-columns: 80px 1fr; }

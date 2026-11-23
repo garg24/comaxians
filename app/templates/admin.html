@@ -35,7 +35,7 @@
 
 <div class="list">
   {% for s in slides %}
-  <article class="row c-{{ s.type }} {% if not s.live %}is-off{% endif %}">
+  <article class="row c-{{ s.type }} {% if not s.live %}is-off{% endif %}" data-id="{{ s.id }}">
     <div class="thumb">
       {% if s.media_type == 'video' %}<video src="{{ url_for('uploaded', name=s.image) }}#t=1" muted preload="metadata"></video><span class="play">▶</span>
       {% elif s.image %}<img src="{{ url_for('uploaded', name=s.image) }}" alt="">{% endif %}
@@ -63,8 +63,12 @@
       {% if s.body %}<p class="muted small clamp">{{ s.body }}</p>{% endif %}
     </div>
     <div class="actions">
-      <form method="post" action="{{ url_for('slide_move', sid=s.id, direction='up') }}"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><button class="icon" title="Monter" {% if loop.first %}disabled{% endif %}>↑</button></form>
-      <form method="post" action="{{ url_for('slide_move', sid=s.id, direction='down') }}"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><button class="icon" title="Descendre" {% if loop.last %}disabled{% endif %}>↓</button></form>
+      <div class="move">
+        {% for dir, sym, label, off in [('first', '⤒', 'Placer en premier', loop.first), ('up', '↑', 'Monter', loop.first),
+                                        ('down', '↓', 'Descendre', loop.last), ('last', '⤓', 'Placer en dernier', loop.last)] %}
+        <form method="post" action="{{ url_for('slide_move', sid=s.id, direction=dir) }}"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><button class="icon" title="{{ label }}" aria-label="{{ label }}" {% if off %}disabled{% endif %}>{{ sym }}</button></form>
+        {% endfor %}
+      </div>
       {% if s.counter_date %}
       <form method="post" action="{{ url_for('slide_reset_counter', sid=s.id) }}" data-confirm="Confirmer : remettre à 0 ?"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><button class="btn" title="Nouvel événement aujourd'hui : la date du dernier événement devient aujourd'hui">↺ Remettre à zéro</button></form>
       {% endif %}
@@ -79,6 +83,18 @@
   <div class="empty card">Aucun contenu pour l'instant. Cliquez sur « ＋ Nouveau contenu » en haut à droite.</div>
   {% endfor %}
 </div>
+<script>
+  // Après un déplacement (#moved-<id>) : le contenu reste visible et clignote brièvement
+  (() => {
+    const m = location.hash.match(/^#moved-(\d+)$/);
+    if (!m) return;
+    history.replaceState(null, '', location.pathname + location.search);
+    const row = document.querySelector(`.row[data-id="${m[1]}"]`);
+    if (!row) return;
+    row.scrollIntoView({ block: 'nearest' });
+    row.classList.add('just-moved');
+  })();
+</script>
 
 <section class="card settings">
   <h2>Paramètres des écrans</h2>

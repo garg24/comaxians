@@ -31,7 +31,7 @@ Détails, écrans supplémentaires et mises à jour : voir [Mise en production](
 - **Entités** (Cloud, Communication…) : chaque diapositive peut être rattachée à une ou plusieurs entités, affichées en étiquettes colorées à côté du surtitre. La liste des entités se modifie dans les paramètres de l'admin.
 - **Compteur de jours automatique** (diapositive Chiffre clé, ex. « jours sans accident ») : on saisit la date du dernier événement, l'écran calcule et incrémente le nombre chaque jour, même hors ligne. Bouton « Remettre à zéro » dans la liste des contenus en cas de nouvel événement.
 - **Disposition au choix** pour les diapositives Succès, Actualité, Partenaire et Événement : texte à gauche et visuel à droite, ou l'inverse (champ « Disposition » du formulaire).
-- **Programmation** : dates de début et de fin, durée par diapositive, activation/désactivation, ordre de passage.
+- **Programmation** : dates de début et de fin, durée par diapositive, activation/désactivation, ordre de passage (↑ ↓ d'un cran, ⤒ ⤓ tout en haut ou tout en bas).
 - **Ciblage des écrans** : un même serveur pour plusieurs écrans (`/display?screen=accueil`).
 - **Thème clair ou sombre, écran par écran** : section « Écrans » de l'admin. Chaque écran y apparaît automatiquement à sa première connexion, avec son état (en ligne / dernière connexion). On choisit pour chacun *Sombre*, *Clair*, *Alterné* (une diapositive sombre, une claire, avec fondu enchaîné) ou *Par défaut* (thème par défaut réglable dans les paramètres). Le changement s'applique en moins d'une minute, sans toucher au Raspberry Pi.
 - **Bandeau défilant « En bref »**, heure et date, barre de progression.
