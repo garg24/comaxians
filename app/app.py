@@ -626,8 +626,13 @@ def update_progress() -> dict:
 
 
 def _write_status(state: str, message: str):
-    UPDATE_STATUS.write_text(json.dumps({"state": state, "message": message,
-                                         "time": datetime.now().isoformat(timespec="seconds")}), encoding="utf-8")
+    # Remplacement (fichier temporaire + renommage) plutôt que réécriture : après une mise à jour,
+    # le fichier appartient à root (écrit par comaxians-update) et le service ne peut pas le modifier,
+    # mais il peut le remplacer car le dossier de données lui appartient.
+    tmp = UPDATE_STATUS.with_name(UPDATE_STATUS.name + ".web")
+    tmp.write_text(json.dumps({"state": state, "message": message,
+                               "time": datetime.now().isoformat(timespec="seconds")}), encoding="utf-8")
+    os.replace(tmp, UPDATE_STATUS)
 
 
 @app.route("/admin/update/check")
@@ -659,8 +664,14 @@ def update_start():
     if st and st.get("state") in ("pending", "running") and recent:
         flash("Une mise à jour est déjà en cours.", "error")
         return redirect(url_for("admin") + "#maj")
-    _write_status("pending", "Mise à jour demandée, démarrage…")
-    UPDATE_REQUEST.write_text(datetime.now().isoformat(timespec="seconds"), encoding="utf-8")
+    try:
+        _write_status("pending", "Mise à jour demandée, démarrage…")
+        UPDATE_REQUEST.write_text(datetime.now().isoformat(timespec="seconds"), encoding="utf-8")
+    except OSError as e:
+        app.logger.error("Lancement de la mise à jour impossible : %s", e)
+        flash(f"Impossible de lancer la mise à jour ({e.strerror or e}). Sur le Raspberry Pi, relancez la commande "
+              "d'installation (voir le README).", "error")
+        return redirect(url_for("admin") + "#maj")
     _update_cache.clear()
     flash("Mise à jour lancée : le serveur redémarre dans quelques minutes, vos contenus sont conservés.", "ok")
     return redirect(url_for("admin") + "#maj")

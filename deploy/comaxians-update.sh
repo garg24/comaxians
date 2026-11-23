@@ -44,7 +44,10 @@ status() {   # status ETAT MESSAGE   (étape en cours : $STEP, de 1 à ${#STEPS[
   elif (( STEP > 0 )); then from=${PCT[STEP-1]} to=${PCT[STEP]}; fi
   printf '{"state": "%s", "message": %s, "time": "%s", "started": "%s", "step": %d, "steps": [%s], "percent": %d, "next_percent": %d}\n' \
     "$1" "$(json_str "$2")" "$(date +%Y-%m-%dT%H:%M:%S)" "$STARTED" "$STEP" "$steps" "$from" "$to" >"$STATUS.tmp"
-  chmod 644 "$STATUS.tmp"; mv -f "$STATUS.tmp" "$STATUS"
+  chmod 644 "$STATUS.tmp"
+  # Même propriétaire que le dossier de données (le service) : l'admin pourra réécrire l'état
+  chown --reference="$DATA_DIR" "$STATUS.tmp" 2>/dev/null || true
+  mv -f "$STATUS.tmp" "$STATUS"
 }
 step() {   # step N : passe à l'étape N (jamais en arrière)
   (( $1 > STEP )) || return 0
