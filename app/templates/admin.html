@@ -240,6 +240,56 @@
   </script>
 </section>
 
+<section class="card settings" id="sauvegarde">
+  <h2>Sauvegarde et restauration</h2>
+  <p class="muted small" style="margin-top:-8px">Un seul fichier (.zip) regroupe tous les contenus avec leurs images et vidéos, les paramètres
+    et les thèmes des écrans. Il permet de revenir en arrière, de reconstruire l'affichage après une réinstallation ou de le recopier
+    sur un autre serveur. Le mot de passe n'y figure pas ; les dates d'anniversaire, si : conservez ce fichier en lieu sûr.</p>
+  <div class="backup-grid">
+    <div class="backup-box">
+      <h3>Exporter</h3>
+      <p class="muted small">{{ backup.slides }} contenu{{ 's' if backup.slides > 1 }} · {{ backup.media }} image{{ 's' if backup.media > 1 }} ou vidéo{{ 's' if backup.media > 1 }} · {{ backup.size }}</p>
+      <a class="btn btn-primary" href="{{ url_for('export_data') }}" download>⬇ Télécharger la sauvegarde</a>
+      {% if backup.too_big %}<p class="small warn">Ce fichier dépassera la taille d'import autorisée ({{ backup.max_mb }} Mo) : pour pouvoir le réimporter,
+        augmentez <code>COMAXIANS_MAX_UPLOAD_MB</code> sur le serveur.</p>{% endif %}
+    </div>
+    <div class="backup-box">
+      <h3>Importer</h3>
+      <form method="post" action="{{ url_for('import_data') }}" enctype="multipart/form-data" id="import-form"
+            data-confirm="Confirmer : tout remplacer ?">
+        <input type="hidden" name="csrf" value="{{ csrf_token() }}">
+        <input type="file" name="archive" accept=".zip,application/zip" required id="import-file"
+               data-max="{{ backup.max_mb * 1024 * 1024 }}">
+        <button class="btn">Importer et remplacer</button>
+      </form>
+      <p class="muted small">Remplace <strong>tous</strong> les contenus, les paramètres et les thèmes des écrans par ceux du fichier
+        (taille maximale : {{ backup.max_mb }} Mo). Une copie de l'état actuel est faite juste avant.</p>
+      <p class="small warn" id="import-warn" hidden></p>
+      {% if backup.safety %}
+      <p class="small">Copie de l'état d'avant le dernier import ({{ backup.safety.date }}) :
+        <a href="{{ url_for('export_safety', name=backup.safety.name) }}">télécharger</a> — pour revenir en arrière, importez ce fichier.</p>
+      {% endif %}
+    </div>
+  </div>
+  <script>
+    (() => {
+      const form = document.getElementById('import-form'), input = document.getElementById('import-file');
+      const warn = document.getElementById('import-warn'), btn = form.querySelector('button');
+      const mb = (n) => (n / 1048576).toFixed(0) + ' Mo';
+      input.addEventListener('change', () => {   // fichier trop gros : refusé avant l'envoi
+        const f = input.files[0], max = +input.dataset.max;
+        warn.hidden = !(f && f.size > max);
+        if (!warn.hidden) warn.textContent = `Fichier trop volumineux (${mb(f.size)}, maximum ${mb(max)}).`;
+        btn.disabled = !warn.hidden;
+      });
+      form.addEventListener('submit', () => {   // 2e clic (confirmé) : envoi en cours
+        if (form.dataset.armed !== '1') return;
+        setTimeout(() => { btn.disabled = true; btn.textContent = 'Import en cours… ne quittez pas la page'; });
+      });
+    })();
+  </script>
+</section>
+
 <section class="card settings" id="ecrans">
   <h2>Écrans</h2>
   <p class="muted small" style="margin-top:-8px">Choisissez le thème de chaque écran. Le changement s'applique en moins d'une minute, sans intervention sur le Raspberry Pi.</p>

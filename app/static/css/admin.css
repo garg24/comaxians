@@ -317,6 +317,16 @@ textarea { resize: vertical; }
   background: #0F172A; color: #CBD5E1; font-size: 12px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere;
 }
 @media (prefers-reduced-motion: reduce) { .upd-bar i { animation: none !important; transition: none; } }
+/* Sauvegarde et restauration */
+.backup-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 16px; }
+.backup-box { border: 1px solid var(--line); border-radius: 14px; padding: 18px 20px; display: flex; flex-direction: column; gap: 10px; align-items: flex-start; }
+.backup-box p { margin: 0; }
+.backup-box form { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin: 0; }
+.backup-box input[type="file"] { max-width: 100%; font: inherit; font-size: 14px; }
+.warn { color: #B45309; }
+#sauvegarde { scroll-margin-top: 90px; }
+@media (max-width: 860px) { .backup-grid { grid-template-columns: 1fr; } }
+
 /* Arrivée depuis le lien « Mise à jour » de l'en-tête : section visible sous la barre, brièvement soulignée */
 #maj { scroll-margin-top: 90px; }
 #maj.spotlight { animation: spotlight 1.8s ease; }

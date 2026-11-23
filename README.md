@@ -38,6 +38,7 @@ Détails, écrans supplémentaires et mises à jour : voir [Mise en production](
 - **Robuste** : la playlist est mise en cache sur l'écran (continue de tourner si le réseau tombe), les modifications s'appliquent sans recharger la page, le texte trop long est réduit automatiquement, rechargement quotidien.
 - **Aperçu** de chaque diapositive depuis l'admin ; flèche droite / espace pour passer à la suivante.
 - **Dupliquer** un contenu : la copie (titre suivi de « (copie) ») est placée juste sous l'original, désactivée, et s'ouvre directement en modification ; on l'active une fois modifiée. L'image ou la vidéo est partagée avec l'original et n'est supprimée du disque que lorsque plus aucune diapositive ne l'utilise.
+- **Sauvegarde et restauration** depuis l'admin : un fichier .zip regroupe contenus, images, vidéos, paramètres et thèmes des écrans ; l'import le réapplique (voir [Ce qui est conservé à chaque mise à jour](#ce-qui-est-conservé-à-chaque-mise-à-jour)).
 
 ## Démarrage rapide (poste de test)
 
@@ -176,9 +177,14 @@ sudo comaxians-restore /var/backups/comaxians/comaxians-avant-maj-20261106-10300
 
 L'état actuel est lui-même sauvegardé (`comaxians-avant-restauration-…`) avant la restauration ; le serveur est arrêté puis relancé automatiquement.
 
+**Sans ligne de commande : section « Sauvegarde et restauration » de l'admin.**
+- *Télécharger la sauvegarde* : un fichier `axians-affichage-AAAA-MM-JJ-HHhMM.zip` avec tous les contenus, leurs images et vidéos, les paramètres et les thèmes des écrans (ni le mot de passe, ni la clé de session). Il contient les dates d'anniversaire : à conserver en lieu sûr.
+- *Importer et remplacer* : remplace tous les contenus, paramètres et thèmes des écrans par ceux du fichier. Le fichier est entièrement vérifié avant toute modification (format, version, fichiers endommagés, place disponible) ; en cas de problème, rien n'est modifié. Une copie de l'état précédent est faite juste avant et reste téléchargeable dans la même section (les 2 plus récentes sont gardées, dans `/var/lib/comaxians/exports`).
+- Utile pour recopier l'affichage sur un autre serveur, ou le reconstruire après une réinstallation. Taille maximale d'un import : `COMAXIANS_MAX_UPLOAD_MB` (500 Mo par défaut).
+
 > Les contenus d'exemple ne sont créés qu'à la toute première installation : si vous supprimez toutes les diapositives, la liste reste vide après un redémarrage ou une mise à jour.
 
-> Pensez à réserver l'adresse IP du Pi dans votre box/routeur, et à copier de temps en temps les sauvegardes hors du Pi (`scp pi@IP-DU-PI:/var/backups/comaxians/*.tar.gz .`) : une carte SD peut lâcher.
+> Pensez à réserver l'adresse IP du Pi dans votre box/routeur, et à garder de temps en temps une sauvegarde hors du Pi (« Télécharger la sauvegarde » dans l'admin, ou `scp pi@IP-DU-PI:/var/backups/comaxians/*.tar.gz .`) : une carte SD peut lâcher.
 
 ### Option B – Un Raspberry Pi « serveur seul » (sans écran)
 

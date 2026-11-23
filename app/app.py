@@ -13,8 +13,11 @@ import json
 import os
 import re
 import secrets
+import shutil
 import sqlite3
+import tempfile
 import uuid
+import zipfile
 from datetime import date, datetime, timedelta
 from functools import wraps
 from pathlib import Path
@@ -24,7 +27,7 @@ import urllib.error
 import urllib.request
 
 from flask import (Flask, abort, flash, g, jsonify, redirect, render_template,
-                   request, send_from_directory, session, url_for)
+                   request, send_file, send_from_directory, session, url_for)
 
 BASE_DIR = Path(__file__).resolve().parent
 DATA_DIR = Path(os.environ.get("COMAXIANS_DATA_DIR", BASE_DIR.parent / "data"))
@@ -512,7 +515,7 @@ def admin():
     return render_template("admin.html", slides=slides, types=SLIDE_TYPES, settings=get_settings(),
                            screens=list_screens(), themes=THEMES, theme_icons=THEME_ICONS,
                            version=installed_version()[:7] or "inconnue", update_status=update_progress(),
-                           can_update=UPDATER_BIN.exists())
+                           can_update=UPDATER_BIN.exists(), backup=backup_info())
 
 
 # ------------------------------------------------------------ mise à jour depuis l'admin
@@ -1027,6 +1030,297 @@ def settings_save():
     db.commit()
     flash("Paramètres enregistrés.", "ok")
     return redirect(url_for("admin"))
+
+
+# ------------------------------------------------------- sauvegarde : export / import
+# Un seul fichier .zip : manifest.json (format, version), data.json (contenus, paramètres, thèmes
+# des écrans) et uploads/ (images et vidéos utilisées). Ni le mot de passe ni la clé de session.
+# L'import remplace tout, après avoir vérifié le fichier et gardé une copie de l'état précédent.
+EXPORT_FORMAT = "comaxians-export"
+EXPORT_VERSION = 1
+EXPORT_DIR = DATA_DIR / "exports"          # copies automatiques faites avant chaque import
+SAFETY_KEEP = 2                            # (les plus récentes ; elles contiennent aussi les vidéos)
+_MEDIA_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,120}$")
+_SETTING_KEY = re.compile(r"^[a-z][a-z0-9_]{0,40}$")
+_SAFETY_NAME = re.compile(r"^avant-import-\d{8}-\d{6}(-\d{1,3})?\.zip$")
+
+
+class ImportRefused(ValueError):
+    """Fichier refusé avant toute modification ; le message est affiché tel quel dans l'admin."""
+
+
+def _plural(n: int, one: str, many: str) -> str:
+    return f"{n} {one if n <= 1 else many}"
+
+
+def _human_size(n: float) -> str:
+    for unit in ("octets", "Ko", "Mo"):
+        if n < 1024:
+            return f"{n:.0f} {unit}" if unit == "octets" else f"{n:.1f} {unit}".replace(".", ",")
+        n /= 1024
+    return f"{n:.2f} Go".replace(".", ",")
+
+
+def _media_ok(name) -> bool:
+    return (isinstance(name, str) and bool(_MEDIA_NAME.match(name))
+            and name.rsplit(".", 1)[-1].lower() in ALLOWED_EXT)
+
+
+def _used_media(db) -> list[Path]:
+    names = {r[0] for r in db.execute("SELECT DISTINCT image FROM slides WHERE image != ''")}
+    return [UPLOAD_DIR / n for n in sorted(names) if _media_ok(n) and (UPLOAD_DIR / n).is_file()]
+
+
+def _safety_copies() -> list[Path]:
+    """Copies faites avant import, la plus récente d'abord."""
+    if not EXPORT_DIR.is_dir():
+        return []
+    return sorted((p for p in EXPORT_DIR.iterdir() if _SAFETY_NAME.match(p.name)),
+                  key=lambda p: (p.stat().st_mtime, p.name), reverse=True)
+
+
+def write_export(dest) -> dict:
+    """Écrit la sauvegarde complète dans dest (chemin, ou fichier ouvert en écriture binaire)."""
+    db = get_db()
+    slides = [{k: r[k] for k in r.keys() if k != "id"}
+              for r in db.execute("SELECT * FROM slides ORDER BY position, id")]
+    settings = {r["key"]: r["value"] for r in db.execute("SELECT key, value FROM settings")}
+    screens = [{"name": r["name"], "theme": r["theme"] or ""}
+               for r in db.execute("SELECT name, theme FROM screens ORDER BY name")]
+    media = _used_media(db)
+    counts = {"slides": len(slides), "media": len(media), "screens": len(screens)}
+    manifest = {"format": EXPORT_FORMAT, "version": EXPORT_VERSION,
+                "created": datetime.now().isoformat(timespec="seconds"),
+                "app_version": installed_version()[:7], "counts": counts}
+    with zipfile.ZipFile(dest, "w", zipfile.ZIP_DEFLATED) as z:
+        z.writestr("manifest.json", json.dumps(manifest, ensure_ascii=False, indent=2))
+        z.writestr("data.json", json.dumps({"slides": slides, "settings": settings, "screens": screens},
+                                           ensure_ascii=False, indent=2))
+        for p in media:   # images et vidéos, déjà compressées : stockées telles quelles
+            z.write(p, f"uploads/{p.name}", compress_type=zipfile.ZIP_STORED)
+    return counts
+
+
+def backup_info() -> dict:
+    """Résumé affiché dans la section « Sauvegarde et restauration » de l'admin."""
+    db = get_db()
+    media = _used_media(db)
+    size = sum(p.stat().st_size for p in media)
+    info = {"slides": db.execute("SELECT COUNT(*) FROM slides").fetchone()[0],
+            "media": len(media), "size": _human_size(size),
+            "too_big": size > app.config["MAX_CONTENT_LENGTH"],
+            "max_mb": app.config["MAX_CONTENT_LENGTH"] // (1024 * 1024), "safety": None}
+    copies = _safety_copies()
+    if copies:
+        s = copies[0].name   # avant-import-AAAAMMJJ-HHMMSS.zip
+        info["safety"] = {"name": copies[0].name, "date": f"{s[19:21]}/{s[17:19]}/{s[13:17]} à {s[22:24]}:{s[24:26]}"}
+    return info
+
+
+def _read_import(z: zipfile.ZipFile) -> tuple[dict, dict]:
+    names = set(z.namelist())
+    not_ours = ImportRefused("Ce fichier n'est pas une sauvegarde de l'affichage : choisissez un fichier "
+                             "obtenu avec « Télécharger la sauvegarde ».")
+    if len(names) > 5000 or "manifest.json" not in names:
+        raise not_ours
+    try:
+        manifest = json.loads(z.read("manifest.json"))
+    except ValueError:
+        raise not_ours from None
+    if not isinstance(manifest, dict) or manifest.get("format") != EXPORT_FORMAT:
+        raise not_ours
+    if not isinstance(manifest.get("version"), int) or manifest["version"] > EXPORT_VERSION:
+        raise ImportRefused("Sauvegarde faite avec une version plus récente de l'application : "
+                            "mettez d'abord ce serveur à jour, puis recommencez l'import.")
+    damaged = ImportRefused("Sauvegarde incomplète ou endommagée : rien n'a été modifié.")
+    if "data.json" not in names or z.getinfo("data.json").file_size > 50 * 1024 * 1024:
+        raise damaged
+    try:
+        data = json.loads(z.read("data.json"))
+    except ValueError:
+        raise damaged from None
+    if not isinstance(data, dict) or not isinstance(data.get("slides"), list):
+        raise damaged
+    return manifest, data
+
+
+def _prepare_import(z: zipfile.ZipFile, data: dict) -> dict:
+    """Vérifie et nettoie le contenu du fichier, sans rien modifier."""
+    db = get_db()
+    cols = [r[1] for r in db.execute("PRAGMA table_info(slides)") if r[1] not in ("id", "position")]
+    names = set(z.namelist())
+    slides, media, skipped, missing = [], {}, 0, 0
+    for s in data["slides"]:
+        if not isinstance(s, dict) or s.get("type") not in SLIDE_TYPES:
+            skipped += 1   # type inconnu de cette version de l'application
+            continue
+        row = {}
+        for c in cols:   # colonnes inconnues ignorées ; colonnes absentes : valeur par défaut
+            v = s.get(c)
+            if isinstance(v, bool):
+                row[c] = int(v)
+            elif isinstance(v, str):
+                row[c] = v[:200_000]
+            elif isinstance(v, (int, float)):
+                row[c] = v
+        row["title"] = row.get("title") or ""
+        img = row.get("image", "")
+        if img and _media_ok(img) and f"uploads/{img}" in names:
+            media[img] = z.getinfo(f"uploads/{img}")
+        elif img:
+            row["image"] = ""
+            missing += 1
+            if row["type"] in TITLE_OPTIONAL:   # vidéo ou affiche sans son fichier : rien à afficher
+                row["active"] = 0
+        slides.append(row)
+    settings = {}
+    if isinstance(data.get("settings"), dict):
+        for k, v in data["settings"].items():
+            if _SETTING_KEY.match(str(k)) and isinstance(v, (str, int, float)) and not isinstance(v, bool):
+                settings[k] = str(v)[:20_000]
+    screens = {}
+    for sc in data.get("screens") if isinstance(data.get("screens"), list) else []:
+        if isinstance(sc, dict) and isinstance(sc.get("name"), str) and normalize_screen(sc["name"]):
+            screens[normalize_screen(sc["name"])] = sc.get("theme") if sc.get("theme") in THEMES else ""
+    if data["slides"] and not slides:
+        raise ImportRefused("Aucun contenu utilisable dans ce fichier : rien n'a été modifié.")
+    # Place nécessaire : visuels importés + copie de l'état actuel (qui contient les visuels actuels)
+    need = (sum(i.file_size for i in media.values()) + sum(p.stat().st_size for p in _used_media(db))
+            + 50 * 1024 * 1024)
+    if shutil.disk_usage(DATA_DIR).free < need:
+        raise ImportRefused(f"Espace disque insuffisant sur le serveur ({_human_size(need)} nécessaires) : "
+                            "rien n'a été modifié.")
+    return {"slides": slides, "media": media, "settings": settings, "screens": screens,
+            "skipped": skipped, "missing": missing}
+
+
+def _safety_copy() -> Path:
+    """Sauvegarde de l'état actuel, faite juste avant un import."""
+    EXPORT_DIR.mkdir(exist_ok=True)
+    stamp = f"avant-import-{datetime.now():%Y%m%d-%H%M%S}"
+    dest, n = EXPORT_DIR / f"{stamp}.zip", 1
+    while dest.exists():   # deux imports dans la même seconde
+        n += 1
+        dest = EXPORT_DIR / f"{stamp}-{n}.zip"
+    tmp = dest.with_name(dest.name + ".tmp")
+    try:
+        write_export(tmp)
+        os.replace(tmp, dest)
+    finally:
+        tmp.unlink(missing_ok=True)
+    return dest
+
+
+def _apply_import(z: zipfile.ZipFile, prep: dict):
+    """Remplace contenus, paramètres et thèmes des écrans, en une seule transaction."""
+    db = get_db()
+    written, mapping = [], {}
+    try:
+        for old, info in prep["media"].items():   # nouveaux noms : aucun conflit avec les fichiers en place
+            new = f"{uuid.uuid4().hex}.{old.rsplit('.', 1)[-1].lower()}"
+            with z.open(info) as src, open(UPLOAD_DIR / new, "wb") as dst:
+                written.append(new)
+                shutil.copyfileobj(src, dst, 1024 * 1024)
+            mapping[old] = new
+        old_images = {r[0] for r in db.execute("SELECT DISTINCT image FROM slides WHERE image != ''")}
+        now = datetime.now().isoformat(timespec="seconds")
+        db.execute("DELETE FROM slides")
+        for pos, row in enumerate(prep["slides"]):
+            row = {"updated_at": now} | row | {"position": pos, "image": mapping.get(row.get("image", ""), "")}
+            db.execute(f"INSERT INTO slides({', '.join(row)}) VALUES ({', '.join('?' * len(row))})",
+                       list(row.values()))
+        # Paramètres absents du fichier : valeur par défaut
+        for k in DEFAULT_SETTINGS.keys() | prep["settings"].keys():
+            db.execute("INSERT INTO settings(key, value) VALUES(?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                       (k, prep["settings"].get(k, DEFAULT_SETTINGS.get(k))))
+        # Écrans : thèmes du fichier ; les écrans qui n'y sont pas réapparaîtront d'eux-mêmes
+        names = list(prep["screens"])
+        db.execute(f"DELETE FROM screens WHERE name NOT IN ({', '.join('?' * len(names))})", names)
+        for n, theme in prep["screens"].items():
+            db.execute("INSERT INTO screens(name, theme) VALUES (?, ?) "
+                       "ON CONFLICT(name) DO UPDATE SET theme=excluded.theme", (n, theme))
+        db.commit()
+    except BaseException:
+        db.rollback()
+        for n in written:
+            delete_upload(n)
+        raise
+    for n in old_images:   # anciens visuels, plus utilisés
+        release_upload(db, n)
+
+
+@app.route("/admin/export")
+@login_required
+def export_data():
+    EXPORT_DIR.mkdir(exist_ok=True)
+    tmp = tempfile.TemporaryFile(dir=EXPORT_DIR)   # sur le disque, pas en mémoire (vidéos)
+    try:
+        write_export(tmp)
+    except BaseException:
+        tmp.close()
+        raise
+    tmp.seek(0)
+    return send_file(tmp, mimetype="application/zip", as_attachment=True, max_age=0,
+                     download_name=f"axians-affichage-{datetime.now():%Y-%m-%d-%Hh%M}.zip")
+
+
+@app.route("/admin/export/copie/<name>")
+@login_required
+def export_safety(name):
+    if not _SAFETY_NAME.match(name):
+        abort(404)
+    return send_from_directory(EXPORT_DIR, name, as_attachment=True, max_age=0)
+
+
+@app.route("/admin/import", methods=["POST"])
+@login_required
+def import_data():
+    back = redirect(url_for("admin"))   # haut de page : le message et la liste des contenus sont visibles
+    f = request.files.get("archive")
+    if not f or not f.filename:
+        flash("Choisissez le fichier de sauvegarde (.zip) à importer.", "error")
+        return back
+    try:
+        with zipfile.ZipFile(f.stream) as z:
+            manifest, data = _read_import(z)
+            prep = _prepare_import(z, data)
+            safety = _safety_copy()
+            try:
+                _apply_import(z, prep)
+            except BaseException:
+                safety.unlink(missing_ok=True)   # rien n'a changé : copie inutile
+                raise
+        for old in _safety_copies()[SAFETY_KEEP:]:   # import réussi : on ne garde que les plus récentes
+            old.unlink(missing_ok=True)
+    except ImportRefused as e:
+        flash(str(e), "error")
+        return back
+    except (zipfile.BadZipFile, zipfile.LargeZipFile, EOFError, NotImplementedError, RuntimeError):
+        # RuntimeError : archive protégée par mot de passe ; NotImplementedError : compression inconnue
+        flash("Ce fichier n'est pas une sauvegarde de l'affichage, ou il est endommagé : rien n'a été modifié.", "error")
+        return back
+    except OSError as e:
+        app.logger.error("Import impossible : %s", e)
+        flash(f"Import impossible ({e.strerror or e}) : rien n'a été modifié.", "error")
+        return back
+    created = str(manifest.get("created", ""))
+    msg = (f"Sauvegarde{f' du {created[8:10]}/{created[5:7]}/{created[:4]}' if len(created) >= 10 else ''} importée : "
+           f"{_plural(len(prep['slides']), 'contenu', 'contenus')}, "
+           f"{_plural(len(prep['media']), 'image ou vidéo', 'images ou vidéos')}, paramètres et thèmes des écrans.")
+    if prep["skipped"]:
+        msg += f" {_plural(prep['skipped'], 'contenu ignoré', 'contenus ignorés')} (type inconnu de cette version)."
+    if prep["missing"]:
+        msg += f" {_plural(prep['missing'], 'visuel manquait', 'visuels manquaient')} dans le fichier."
+    flash(msg + " Les écrans se mettent à jour d'eux-mêmes en moins d'une minute.", "ok")
+    return back
+
+
+@app.errorhandler(413)
+def too_large(_e):
+    limit = app.config["MAX_CONTENT_LENGTH"] // (1024 * 1024)
+    flash(f"Fichier trop volumineux : {limit} Mo au maximum (réglable sur le serveur avec "
+          "COMAXIANS_MAX_UPLOAD_MB).", "error")
+    return redirect(request.referrer or url_for("admin"))
 
 
 init_db()
