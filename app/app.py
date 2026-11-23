@@ -7,18 +7,27 @@ Un serveur central (cette application) héberge :
 """
 from __future__ import annotations
 
+import base64
 import calendar
 import hashlib
+import io
 import json
 import os
 import re
 import secrets
 import shutil
+import smtplib
+import socket
 import sqlite3
+import ssl
+import struct
 import tempfile
+import threading
 import uuid
 import zipfile
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, time as dtime, timedelta
+from email.message import EmailMessage
+from email.utils import formataddr, formatdate, make_msgid
 from functools import wraps
 from pathlib import Path
 import subprocess
@@ -26,8 +35,14 @@ import time
 import urllib.error
 import urllib.request
 
-from flask import (Flask, abort, flash, g, jsonify, redirect, render_template,
+from flask import (Flask, abort, flash, g, has_request_context, jsonify, redirect, render_template,
                    request, send_file, send_from_directory, session, url_for)
+from markupsafe import Markup, escape
+
+try:   # facultatif : images des e-mails converties (WebP → JPEG/PNG), allégées, portrait rond
+    from PIL import Image, ImageDraw, ImageOps
+except ImportError:
+    Image = None
 
 BASE_DIR = Path(__file__).resolve().parent
 DATA_DIR = Path(os.environ.get("COMAXIANS_DATA_DIR", BASE_DIR.parent / "data"))
@@ -69,7 +84,19 @@ DEFAULT_SETTINGS = {
     "show_ticker": "1",
     "default_theme": "dark",
     "entities": "Cloud\nCommunication",
+    # E-mail à la publication (section « E-mail à la publication » de l'admin)
+    "mail_enabled": "0",
+    "mail_recipients": "{}",      # {"Cloud": ["a@axians.fr", …], "": [contenus sans entité]}
+    "mail_theme": "dark",
+    "mail_from": "",
+    "mail_from_name": "",
+    "smtp_host": "",
+    "smtp_port": "587",
+    "smtp_security": "starttls",
+    "smtp_user": "",
 }
+# Réglages propres à ce serveur : jamais dans une sauvegarde, jamais remplacés par un import
+LOCAL_SETTINGS = {"smtp_password", "mail_enabled", "mail_status"}
 # Couleurs attribuées aux entités, dans l'ordre de la liste
 ENTITY_COLORS = ["#22D3EE", "#F59E0B", "#22C55E", "#A855F7", "#FF5A5F", "#2F6BFF"]
 THEMES = {"dark": "Sombre", "light": "Clair", "alternate": "Alterné"}
@@ -121,7 +148,10 @@ CREATE TABLE IF NOT EXISTS slides (
     screens     TEXT DEFAULT '',
     active      INTEGER DEFAULT 1,
     position    INTEGER DEFAULT 0,
-    updated_at  TEXT
+    updated_at  TEXT,
+    mail_on_publish INTEGER DEFAULT 1,
+    mailed_at   TEXT DEFAULT '',
+    mail_note   TEXT DEFAULT ''
 );
 CREATE TABLE IF NOT EXISTS screens (
     name      TEXT PRIMARY KEY,
@@ -168,6 +198,13 @@ def init_db():
         db.execute("ALTER TABLE slides ADD COLUMN entities TEXT DEFAULT ''")
     if "people" not in cols:
         db.execute("ALTER TABLE slides ADD COLUMN people TEXT DEFAULT ''")
+    if "mail_on_publish" not in cols:   # e-mail à la publication (rien n'est envoyé tant qu'il n'est pas activé)
+        db.execute("ALTER TABLE slides ADD COLUMN mail_on_publish INTEGER DEFAULT 1")
+        db.execute("UPDATE slides SET mail_on_publish=0 WHERE type IN ('video', 'anniversaire')")
+    if "mailed_at" not in cols:
+        db.execute("ALTER TABLE slides ADD COLUMN mailed_at TEXT DEFAULT ''")
+    if "mail_note" not in cols:
+        db.execute("ALTER TABLE slides ADD COLUMN mail_note TEXT DEFAULT ''")
     for k, v in DEFAULT_SETTINGS.items():
         db.execute("INSERT OR IGNORE INTO settings(key, value) VALUES (?, ?)", (k, v))
     if new_database:
@@ -290,7 +327,10 @@ def slide_entities(r, entities: list[dict]) -> list[dict]:
 
 @app.context_processor
 def inject_entities():
-    return {"ENTITIES": entity_list() if request.endpoint not in ("display", "uploaded", "static") else []}
+    # Hors requête (e-mail rendu par la tâche de fond) : inutile
+    if not has_request_context() or request.endpoint in ("display", "uploaded", "static"):
+        return {"ENTITIES": []}
+    return {"ENTITIES": entity_list()}
 
 
 @app.before_request
@@ -508,14 +548,17 @@ def admin():
                          "entity_tags": slide_entities(r, ents),
                          "bday": _birthday_summary(r) if r["type"] == "anniversaire" else None}
               for r in rows]
-    for s in slides:   # une diapositive Anniversaires n'est diffusée que les jours d'anniversaire
-        if s["bday"] is not None and not s["bday"]["today"]:
+    settings = get_settings()
+    now = datetime.now()
+    for s, r in zip(slides, rows):
+        if s["bday"] is not None and not s["bday"]["today"]:   # diffusée seulement les jours d'anniversaire
             s["waiting"] = s["live"]
             s["live"] = False
-    return render_template("admin.html", slides=slides, types=SLIDE_TYPES, settings=get_settings(),
+        s["mail"] = mail_badge(r, settings, now)
+    return render_template("admin.html", slides=slides, types=SLIDE_TYPES, settings=public_settings(settings),
                            screens=list_screens(), themes=THEMES, theme_icons=THEME_ICONS,
                            version=installed_version()[:7] or "inconnue", update_status=update_progress(),
-                           can_update=UPDATER_BIN.exists(), backup=backup_info())
+                           can_update=UPDATER_BIN.exists(), backup=backup_info(), mail=mail_admin_info(settings))
 
 
 # ------------------------------------------------------------ mise à jour depuis l'admin
@@ -727,6 +770,8 @@ def _form_values() -> dict:
         "end_date": f.get("end_date", "").strip(),
         "screens": f.get("screens", "").strip(),
         "active": 1 if f.get("active") else 0,
+        # Anniversaires : jamais envoyés par e-mail (contenu quotidien)
+        "mail_on_publish": 1 if f.get("mail_on_publish") and t != "anniversaire" else 0,
         "sound": 1 if f.get("sound") else 0,
         "layout": f.get("layout") if f.get("layout") in LAYOUTS else "right",
         # Mode compteur ("days") : date du dernier événement ; sinon valeur fixe
@@ -891,6 +936,8 @@ def slide_new():
         flash("Diapositive créée.", "ok")
         return redirect(url_for("admin"))
     blank = {"type": request.args.get("type", "actualite"), "active": 1}
+    # E-mail à la publication coché par défaut, sauf pour une vidéo (illisible dans un e-mail)
+    blank["mail_on_publish"] = 0 if blank["type"] in ("video", "anniversaire") else 1
     if blank["type"] == "employe":   # pré-remplissage pratique
         blank |= {"kicker": "Employé du mois", "highlight": month_label(date.today())}
     if blank["type"] == "anniversaire":
@@ -955,6 +1002,7 @@ def slide_duplicate(sid):
     if v["title"]:
         v["title"] = f"{v['title']} (copie)"
     v["active"] = 0
+    v["mailed_at"] = v["mail_note"] = ""   # nouveau contenu : envoyé par e-mail à sa publication
     v["updated_at"] = datetime.now().isoformat(timespec="seconds")
     # Place libérée juste après l'original : les diapositives suivantes descendent d'un cran
     ids = [r["id"] for r in db.execute("SELECT id FROM slides ORDER BY position, id")]
@@ -984,7 +1032,9 @@ def slide_reset_counter(sid):
 @login_required
 def slide_toggle(sid):
     db = get_db()
-    db.execute("UPDATE slides SET active = 1 - active WHERE id=?", (sid,))
+    # updated_at : l'e-mail d'un contenu activé part quelques minutes après (cf. mail_due)
+    db.execute("UPDATE slides SET active = 1 - active, updated_at=? WHERE id=?",
+               (datetime.now().isoformat(timespec="seconds"), sid))
     db.commit()
     return redirect(url_for("admin"))
 
@@ -1030,6 +1080,752 @@ def settings_save():
     db.commit()
     flash("Paramètres enregistrés.", "ok")
     return redirect(url_for("admin"))
+
+
+# ------------------------------------------------------------ e-mail à la publication
+# Chaque contenu est envoyé une seule fois par e-mail, avec sa mise en forme, quand il commence à
+# être diffusé (enregistrement, activation ou date de début atteinte) : aux adresses de ses entités,
+# ou à la liste « contenus sans entité ». La tâche de fond lancée par run.py (start_mailer)
+# regarde toutes les 30 secondes s'il y a un contenu à envoyer.
+MAIL_TICK = 30          # secondes entre deux vérifications
+MAIL_DELAY = 120        # délai après l'enregistrement, le temps de corriger une coquille
+MAIL_HOUR = 8           # une publication programmée (date de début) part à partir de 8 h ce jour-là
+MAIL_SECURITY = {"starttls": ("STARTTLS", 587), "ssl": ("SSL/TLS", 465), "none": ("Aucune (relais interne)", 25)}
+MAIL_THEMES = {"dark": "Sombre", "light": "Clair"}
+_EMAIL = re.compile(r"^[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]{1,64}@"
+                    r"(?:[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?\.)+[A-Za-z]{2,}$")
+TYPE_ACCENTS = {   # mêmes couleurs que sur les écrans (display.css)
+    "succes": ("#FF3D9A", "#8B5CF6"), "actualite": ("#2F6BFF", "#22D3EE"),
+    "partenaire": ("#22D3EE", "#2F6BFF"), "evenement": ("#F59E0B", "#FF3D9A"),
+    "chiffre": ("#8B5CF6", "#FF3D9A"), "message": ("#2F6BFF", "#E0218A"),
+    "video": ("#FF5A5F", "#F59E0B"),
+}
+DEFAULT_ACCENT = ("#2F6BFF", "#E0218A")
+DAYS_FR = ["lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi", "dimanche"]
+_mail_backoff = {"until": None, "fails": 0}   # après un échec, nouvel essai de plus en plus espacé
+_mail_thread: threading.Thread | None = None
+
+
+def public_settings(settings: dict) -> dict:
+    """Paramètres transmis aux pages de l'admin : jamais le mot de passe SMTP."""
+    return {k: v for k, v in settings.items() if k != "smtp_password"}
+
+
+def smtp_password(settings: dict) -> str:
+    return os.environ.get("COMAXIANS_SMTP_PASSWORD") or settings.get("smtp_password") or ""
+
+
+def smtp_port(settings: dict) -> int:
+    sec = settings.get("smtp_security") if settings.get("smtp_security") in MAIL_SECURITY else "starttls"
+    try:
+        port = int(settings.get("smtp_port") or 0)
+    except ValueError:
+        port = 0
+    return port if 0 < port < 65536 else MAIL_SECURITY[sec][1]
+
+
+def mail_config_error(settings: dict) -> str | None:
+    """Ce qui manque pour pouvoir envoyer, ou None."""
+    if not settings.get("smtp_host"):
+        return "indiquez le serveur d'envoi (SMTP)"
+    if not _EMAIL.match(settings.get("mail_from") or ""):
+        return "indiquez l'adresse d'expédition"
+    if settings.get("smtp_user") and not smtp_password(settings):
+        return "indiquez le mot de passe du compte d'envoi"
+    return None
+
+
+def parse_addresses(raw: str) -> tuple[list[str], list[str]]:
+    """Adresses d'un champ libre (virgules, points-virgules, espaces ou une par ligne). Une liste copiée
+    depuis Outlook (« Dupont, Jean <jean.dupont@axians.fr>; … ») convient : les noms sont ignorés.
+    Renvoie (adresses valides, sans doublon ; éléments refusés)."""
+    ok, bad, seen = [], [], set()
+    for token in re.split(r"[\s,;<>()\"\[\]]+", raw or ""):
+        token = token.strip(".'")
+        if "@" not in token:
+            continue
+        if _EMAIL.match(token) and len(token) <= 254:
+            if token.lower() not in seen:
+                seen.add(token.lower())
+                ok.append(token)
+        else:
+            bad.append(token)
+    return ok[:500], bad
+
+
+def mail_lists(settings: dict) -> dict[str, list[str]]:
+    """Destinataires par entité (nom en minuscules ; "" = contenus sans entité)."""
+    try:
+        raw = json.loads(settings.get("mail_recipients") or "{}")
+    except ValueError:
+        raw = {}
+    lists = {}
+    for name, addrs in (raw.items() if isinstance(raw, dict) else []):
+        if isinstance(name, str) and isinstance(addrs, list):
+            lists[name.strip().lower()] = [a for a in addrs if isinstance(a, str) and _EMAIL.match(a)]
+    return lists
+
+
+def slide_recipients(r, settings: dict, ents: list[dict] | None = None) -> tuple[list[str], list[str]]:
+    """(destinataires sans doublon, entités du contenu) : réunion des listes de ses entités."""
+    lists = mail_lists(settings)
+    names = [e["name"] for e in slide_entities(r, entity_list(settings) if ents is None else ents)]
+    out, seen = [], set()
+    for key in [n.lower() for n in names] or [""]:
+        for a in lists.get(key, []):
+            if a.lower() not in seen:
+                seen.add(a.lower())
+                out.append(a)
+    return out, names
+
+
+def _mix(a: str, b: str, pct: float) -> str:
+    """Couleur a posée à pct % sur la couleur b : équivalent opaque de color-mix(), lu par Outlook."""
+    x = [int(a[i:i + 2], 16) for i in (1, 3, 5)]
+    y = [int(b[i:i + 2], 16) for i in (1, 3, 5)]
+    return "#" + "".join(f"{round(p * pct / 100 + q * (1 - pct / 100)):02X}" for p, q in zip(x, y))
+
+
+def mail_palette(theme: str, accent: str, accent2: str) -> dict:
+    dark = theme != "light"
+    page, card, text = ("#070B18", "#0D1428", "#F4F6FB") if dark else ("#F3F5FA", "#FFFFFF", "#0B1222")
+    return {
+        "scheme": "dark" if dark else "light", "page": page, "card": card, "text": text,
+        "dim": _mix(text, card, 70 if dark else 64),
+        "line": _mix(text, card, 14 if dark else 10),
+        "glass": _mix(text, card, 6 if dark else 4),
+        "accent": accent, "accent2": accent2,
+        "accent_text": accent if dark else _mix(accent, "#000000", 80),   # lisible sur fond blanc
+        "tag_bg": _mix(accent, card, 16 if dark else 10),
+        "tag_line": _mix(accent, card, 45 if dark else 35),
+        "contrast": text, "contrast_text": card,
+        "logo": "axians-logo-mail-white.png" if dark else "axians-logo-mail.png",
+    }
+
+
+def long_date(d: date) -> str:
+    """« Lundi 23 novembre 2026 »"""
+    return f"{DAYS_FR[d.weekday()].capitalize()} {'1er' if d.day == 1 else d.day} {MONTHS_FR[d.month - 1]} {d.year}"
+
+
+def _col(r, key: str, default=""):
+    try:
+        v = r[key]
+    except (IndexError, KeyError):
+        return default
+    return default if v is None else v
+
+
+def mail_view(r, settings: dict, ents: list[dict] | None = None) -> dict:
+    """Ce qu'affiche l'e-mail d'un contenu (r : ligne de la base ou dictionnaire équivalent)."""
+    t = _col(r, "type") or "actualite"
+    image = _col(r, "image")
+    theme = settings.get("mail_theme") if settings.get("mail_theme") in MAIL_THEMES else "dark"
+    v = {
+        "id": _col(r, "id", None), "type": t, "type_label": SLIDE_TYPES.get(t, t),
+        "kicker": _col(r, "kicker").strip(), "title": _col(r, "title").strip(), "body": _col(r, "body").strip(),
+        "highlight": _col(r, "highlight").strip(), "highlight_label": _col(r, "highlight_label").strip(),
+        "entities": slide_entities(r, entity_list(settings) if ents is None else ents),
+        "image": image if media_type(image) == "image" else "",
+        "has_video": media_type(image) == "video",
+        "site_name": settings.get("site_name") or "Axians",
+        "date_label": long_date(date.today()),
+        "c": mail_palette(theme, *TYPE_ACCENTS.get(t, DEFAULT_ACCENT)),
+    }
+    v["body_html"] = Markup("<br>").join(escape(line) for line in v["body"].splitlines())
+    v["initials"] = "".join(w[0] for w in v["title"].split()[:2]).upper()
+    if t == "chiffre":   # compteur de jours : valeur du jour de l'envoi
+        n = days_since(_col(r, "counter_date"))
+        v["value"] = f"{n:,}".replace(",", " ") if n is not None else (v["highlight"] or "—")
+    v["subject"] = mail_subject(v)
+    return v
+
+
+def mail_subject(v: dict) -> str:
+    title, kicker = v["title"], v["kicker"]
+    if kicker and title and kicker.lower() not in title.lower():
+        s = f"{kicker} – {title}"
+    else:
+        s = title or kicker or v["type_label"]
+    return re.sub(r"\s+", " ", s).strip()[:180]
+
+
+def mail_text(v: dict) -> str:
+    """Version texte de l'e-mail (lue par les messageries qui n'affichent pas le HTML)."""
+    lines = []
+    tags = ([v["kicker"]] if v["kicker"] else []) + [e["name"] for e in v["entities"]]
+    if tags:
+        lines += [" · ".join(tags), ""]
+    if v["type"] == "chiffre":
+        lines += [f"{v['value']} {v['highlight_label']}".strip(), ""]
+    if v["type"] == "evenement" and v["highlight"]:
+        lines += [f"{v['highlight']} {v['highlight_label']}".strip(), ""]
+    if v["title"] and v["type"] != "image":
+        lines.append(v["title"])
+    if v["type"] == "employe":
+        lines += [x for x in (v["highlight_label"], f"★ {v['highlight']}" if v["highlight"] else "") if x]
+    if v["body"] and v["type"] != "image":
+        lines += ["", v["body"]]
+    if v["type"] in ("succes", "actualite") and v["highlight"]:
+        lines += ["", f"{v['highlight']} – {v['highlight_label']}".strip(" –")]
+    if v["type"] == "video":
+        lines += ["", "(Vidéo à découvrir sur les écrans d'affichage)"]
+    lines += ["", "--", f"Publié sur les écrans d'affichage {v['site_name']} – {v['date_label']}"]
+    return "\n".join(lines).strip() + "\n"
+
+
+# Images jointes : taille réelle maximale (affichées deux fois plus petites, nettes sur écran haute densité)
+MAIL_IMG_MAX = {"hero": (1196, 1600), "poster": (1196, 2400), "logo": (520, 280), "portrait": (360, 360)}
+MAIL_IMG_BOX = {"hero": (598, 800), "poster": (598, 1200), "logo": (260, 140), "portrait": (180, 180)}
+
+
+def _mail_kind(v: dict) -> str | None:
+    if not v["image"]:
+        return None
+    return {"partenaire": "logo", "employe": "portrait", "image": "poster"}.get(v["type"], "hero")
+
+
+def _display_size(w: int, h: int, kind: str) -> dict:
+    bw, bh = MAIL_IMG_BOX[kind]
+    scale = bw / w if kind in ("hero", "poster") else min(bw / w, bh / h)
+    return {"w": round(w * scale), "h": round(h * scale)}
+
+
+def _portrait(im, c: dict) -> dict:
+    """Photo ronde entourée d'un anneau dégradé, comme sur les écrans (PNG transparent)."""
+    size, ring, gap, k = 360, 10, 12, 3            # k : suréchantillonnage pour des bords lisses
+    big, lanczos = size * k, Image.Resampling.LANCZOS
+    inner = big - 2 * (ring + gap) * k
+    photo = ImageOps.fit(im.convert("RGB"), (inner, inner), method=lanczos, centering=(0.5, 0.4))
+    grad = Image.linear_gradient("L").rotate(90).resize((big, big))   # de gauche à droite
+    ring_img = Image.composite(Image.new("RGB", (big, big), c["accent2"]),
+                               Image.new("RGB", (big, big), c["accent"]), grad)
+    out = Image.new("RGBA", (big, big), (0, 0, 0, 0))
+    mask = Image.new("L", (big, big), 0)
+    draw = ImageDraw.Draw(mask)
+    draw.ellipse((0, 0, big - 1, big - 1), fill=255)
+    draw.ellipse((ring * k, ring * k, big - 1 - ring * k, big - 1 - ring * k), fill=0)
+    out.paste(ring_img, (0, 0), mask)
+    mask = Image.new("L", (inner, inner), 0)
+    ImageDraw.Draw(mask).ellipse((0, 0, inner - 1, inner - 1), fill=255)
+    out.paste(photo, ((ring + gap) * k,) * 2, mask)
+    buf = io.BytesIO()
+    out.resize((size, size), lanczos).save(buf, "PNG", optimize=True)
+    return {"data": buf.getvalue(), "subtype": "png", **_display_size(size, size, "portrait")}
+
+
+def mail_image(name: str, kind: str, c: dict) -> dict | None:
+    """Image jointe à l'e-mail : {data, subtype, w, h} (w, h : taille affichée), ou None si impossible."""
+    path = UPLOAD_DIR / name
+    ext = name.rsplit(".", 1)[-1].lower()
+    if not _media_ok(name) or not path.is_file() or ext == "svg":   # SVG : ni Outlook ni Gmail ne l'affichent
+        return None
+    if Image is None:   # sans Pillow : JPEG, PNG et GIF joints tels quels ; WebP illisible dans Outlook
+        if ext not in ("jpg", "jpeg", "png", "gif") or path.stat().st_size > 8 * 1024 * 1024:
+            return None
+        return {"data": path.read_bytes(), "subtype": "jpeg" if ext in ("jpg", "jpeg") else ext, "w": None, "h": None}
+    try:
+        with Image.open(path) as src:
+            if getattr(src, "is_animated", False) and ext == "gif" and path.stat().st_size <= 4 * 1024 * 1024:
+                return {"data": path.read_bytes(), "subtype": "gif", **_display_size(*src.size, kind)}  # animation gardée
+            im = ImageOps.exif_transpose(src)
+            if kind == "portrait":
+                return _portrait(im, c)
+            im.thumbnail(MAIL_IMG_MAX[kind], Image.Resampling.LANCZOS)
+            buf = io.BytesIO()
+            if im.mode in ("RGBA", "LA", "PA") or (im.mode == "P" and "transparency" in im.info):
+                im.convert("RGBA").save(buf, "PNG", optimize=True)   # logo détouré : transparence gardée
+                subtype = "png"
+            else:
+                im.convert("RGB").save(buf, "JPEG", quality=85, optimize=True, progressive=True)
+                subtype = "jpeg"
+            return {"data": buf.getvalue(), "subtype": subtype, **_display_size(*im.size, kind)}
+    except (OSError, ValueError, Image.DecompressionBombError) as e:
+        app.logger.warning("Image %s non jointe à l'e-mail : %s", name, e)
+        return None
+
+
+def _mail_logo(c: dict) -> dict | None:
+    p = BASE_DIR / "static" / "img" / c["logo"]
+    try:
+        data = p.read_bytes()
+    except OSError:
+        return None
+    if data[:8] != b"\x89PNG\r\n\x1a\n":
+        return None
+    w, h = struct.unpack(">II", data[16:24])
+    return {"data": data, "subtype": "png", "w": round(w * 26 / h), "h": 26}
+
+
+def mail_assets(v: dict) -> dict:
+    """Images de l'e-mail : logo et visuel du contenu."""
+    assets = {}
+    logo = _mail_logo(v["c"])
+    if logo:
+        assets["logo"] = logo
+    kind = _mail_kind(v)
+    img = mail_image(v["image"], kind, v["c"]) if kind else None
+    if img:
+        assets["media"] = img | {"kind": kind}
+    return assets
+
+
+def mail_warnings(v: dict, assets: dict) -> list[str]:
+    """Ce qui, dans le contenu, ne peut pas figurer dans l'e-mail."""
+    out = []
+    if v["image"] and "media" not in assets:
+        ext = v["image"].rsplit(".", 1)[-1].lower()
+        out.append("Image SVG : ni Outlook ni Gmail ne l'affichent, elle n'est pas jointe à l'e-mail." if ext == "svg"
+                   else "Image WebP : Outlook ne l'affiche pas et ce serveur ne peut pas la convertir (module "
+                        "Pillow absent, cf. README) : elle n'est pas jointe à l'e-mail." if ext == "webp"
+                   else "Image introuvable ou illisible : elle n'est pas jointe à l'e-mail.")
+    if v["has_video"]:
+        out.append("Une vidéo ne peut pas être lue dans un e-mail : il invite à la découvrir sur les écrans.")
+    return out
+
+
+def render_mail_html(v: dict, assets: dict, cids: dict | None = None) -> str:
+    """HTML de l'e-mail. Avec cids : images jointes (envoi) ; sans : images intégrées (aperçu)."""
+    img = {role: a | {"src": f"cid:{cids[role]}" if cids else
+                      f"data:image/{a['subtype']};base64,{base64.b64encode(a['data']).decode()}"}
+           for role, a in assets.items()}
+    return render_template("mail/publication.html", v=v, c=v["c"], img=img, F=MAIL_FONT)
+
+
+MAIL_FONT = "font-family:Inter,Segoe UI,Roboto,Helvetica Neue,Arial,sans-serif;"
+
+
+def build_mail(v: dict, settings: dict, to: str | None = None, test: bool = False) -> EmailMessage:
+    """E-mail prêt à partir (HTML + texte, images jointes). Sans « to » : adressé à l'expéditeur,
+    les destinataires sont en copie cachée (cf. smtp_send)."""
+    from_addr = settings["mail_from"]
+    domain = from_addr.rsplit("@", 1)[-1]
+    sender = formataddr((settings.get("mail_from_name") or f"{v['site_name']} Affichage", from_addr))
+    assets = mail_assets(v)
+    msg = EmailMessage()
+    msg["Subject"] = ("[Test] " if test else "") + v["subject"]
+    msg["From"] = sender
+    msg["To"] = to or sender
+    msg["Date"] = formatdate(localtime=True)
+    msg["Message-ID"] = make_msgid(domain=domain)
+    msg["Auto-Submitted"] = "auto-generated"          # pas de réponse automatique (message d'absence…)
+    msg["X-Auto-Response-Suppress"] = "All"
+    msg.set_content(mail_text(v))
+    cids = {role: make_msgid(domain=domain)[1:-1] for role in assets}
+    msg.add_alternative(render_mail_html(v, assets, cids), subtype="html")
+    html = msg.get_payload()[-1]
+    for role, a in assets.items():
+        html.add_related(a["data"], "image", a["subtype"], cid=f"<{cids[role]}>",
+                         filename=f"{role}.{'jpg' if a['subtype'] == 'jpeg' else a['subtype']}")
+    return msg
+
+
+def smtp_send(settings: dict, msg: EmailMessage, recipients: list[str]) -> dict:
+    """Envoie msg aux destinataires (enveloppe SMTP : en copie cachée). Renvoie les adresses refusées."""
+    sec = settings.get("smtp_security") if settings.get("smtp_security") in MAIL_SECURITY else "starttls"
+    host, port, ctx = settings["smtp_host"], smtp_port(settings), ssl.create_default_context()
+    server = (smtplib.SMTP_SSL(host, port, timeout=30, context=ctx) if sec == "ssl"
+              else smtplib.SMTP(host, port, timeout=30))
+    refused = {}
+    with server as s:
+        s.ehlo()
+        if sec == "starttls":
+            s.starttls(context=ctx)
+            s.ehlo()
+        if settings.get("smtp_user"):
+            s.login(settings["smtp_user"], smtp_password(settings))
+        for i in range(0, len(recipients), 100):   # limite de destinataires par message des serveurs
+            refused.update(s.send_message(msg, from_addr=settings["mail_from"], to_addrs=recipients[i:i + 100]))
+    return refused
+
+
+def mail_error_text(e: Exception) -> str:
+    """Message compréhensible pour l'admin, suivi du détail technique."""
+    checks = [
+        (smtplib.SMTPAuthenticationError, "identifiant ou mot de passe refusé par le serveur d'envoi"),
+        (smtplib.SMTPNotSupportedError, "mode de sécurité non proposé par le serveur d'envoi (essayez un autre mode ou port)"),
+        (smtplib.SMTPSenderRefused, "adresse d'expédition refusée par le serveur d'envoi"),
+        (smtplib.SMTPRecipientsRefused, "toutes les adresses ont été refusées par le serveur d'envoi"),
+        (smtplib.SMTPServerDisconnected, "connexion interrompue par le serveur d'envoi"),
+        (smtplib.SMTPResponseException, "envoi refusé par le serveur d'envoi"),
+        (ssl.SSLCertVerificationError, "certificat du serveur d'envoi non reconnu"),
+        (ssl.SSLError, "connexion chiffrée impossible (vérifiez le mode de sécurité et le port)"),
+        (socket.gaierror, "serveur d'envoi introuvable (nom incorrect ou pas d'accès au réseau)"),
+        (ConnectionRefusedError, "connexion refusée (serveur ou port incorrect)"),
+        (TimeoutError, "le serveur d'envoi ne répond pas (pare-feu, serveur ou port incorrect)"),
+        (OSError, "connexion au serveur d'envoi impossible"),
+    ]
+    text = next((t for cls, t in checks if isinstance(e, cls)), "envoi impossible")
+    if isinstance(e, smtplib.SMTPResponseException):
+        err = e.smtp_error.decode(errors="replace") if isinstance(e.smtp_error, bytes) else str(e.smtp_error)
+        detail = f"{e.smtp_code} {err}"
+    else:
+        detail = str(e)
+    detail = " ".join(detail.split())[:200]
+    return f"{text} ({detail})" if detail else text
+
+
+def _set_mail_status(db, ok: bool, message: str, now: datetime | None = None):
+    status = {"time": (now or datetime.now()).isoformat(timespec="seconds"), "ok": ok, "message": message[:400]}
+    db.execute("INSERT INTO settings(key, value) VALUES('mail_status', ?) "
+               "ON CONFLICT(key) DO UPDATE SET value=excluded.value", (json.dumps(status, ensure_ascii=False),))
+
+
+def mail_due(r) -> datetime:
+    """Heure d'envoi d'un contenu diffusé : MAIL_DELAY après son enregistrement, et pas avant
+    MAIL_HOUR le jour de sa date de début."""
+    due = datetime.min
+    try:
+        due = datetime.fromisoformat(r["updated_at"]) + timedelta(seconds=MAIL_DELAY)
+    except (TypeError, ValueError):
+        pass
+    try:
+        if r["start_date"]:
+            due = max(due, datetime.combine(date.fromisoformat(r["start_date"]), dtime(MAIL_HOUR)))
+    except ValueError:
+        pass
+    return due
+
+
+def _slide_label(r) -> str:
+    return _col(r, "title") or SLIDE_TYPES.get(_col(r, "type"), "Contenu")
+
+
+def send_slide(r, settings: dict, recipients: list[str], ents=None, test: bool = False) -> dict:
+    v = mail_view(r, settings, ents)
+    return smtp_send(settings, build_mail(v, settings, to=recipients[0] if test else None, test=test), recipients)
+
+
+def _sent_note(recipients: list[str], refused: dict) -> str:
+    note = f"Envoyé à {_plural(len(recipients) - len(refused), 'destinataire', 'destinataires')}"
+    if refused:
+        note += f" ; refusé{'s' if len(refused) > 1 else ''} par le serveur : {', '.join(list(refused)[:5])}"
+    return note
+
+
+def mail_tick(now: datetime | None = None) -> list[int]:
+    """Envoie les contenus dont la diffusion a commencé ; renvoie leurs numéros."""
+    now = now or datetime.now()
+    settings = get_settings()
+    if settings.get("mail_enabled") != "1" or mail_config_error(settings):
+        return []
+    if _mail_backoff["until"] and now < _mail_backoff["until"]:
+        return []
+    db = get_db()
+    today, ents, sent = now.date().isoformat(), entity_list(settings), []
+    rows = db.execute("SELECT * FROM slides WHERE mailed_at='' AND mail_on_publish=1 AND type != 'anniversaire' "
+                      "ORDER BY position, id").fetchall()
+    for r in rows:
+        if not is_live(r, today) or now < mail_due(r):
+            continue
+        stamp = now.isoformat(timespec="seconds")
+        recipients, names = slide_recipients(r, settings, ents)
+        if not recipients:
+            note = "Non envoyé : aucune adresse pour " + (", ".join(names) if names else "les contenus sans entité")
+            db.execute("UPDATE slides SET mailed_at=?, mail_note=? WHERE id=? AND mailed_at=''", (stamp, note, r["id"]))
+            db.commit()
+            continue
+        # Réservation : un contenu ne part qu'une fois, même si deux envois se croisent
+        if db.execute("UPDATE slides SET mailed_at=?, mail_note='Envoi en cours…' WHERE id=? AND mailed_at=''",
+                      (stamp, r["id"])).rowcount != 1:
+            continue
+        db.commit()
+        try:
+            refused = send_slide(r, settings, recipients, ents)
+        except Exception as e:   # contenu remis en attente : nouvel essai plus tard
+            if not isinstance(e, (smtplib.SMTPException, OSError)):
+                app.logger.exception("E-mail du contenu %s", r["id"])
+            err = mail_error_text(e)
+            db.execute("UPDATE slides SET mailed_at='', mail_note=? WHERE id=? AND mailed_at=?",
+                       (f"Échec : {err}", r["id"], stamp))
+            _set_mail_status(db, False, f"« {_slide_label(r)} » non envoyé : {err}", now)
+            db.commit()
+            _mail_backoff["fails"] += 1
+            _mail_backoff["until"] = now + timedelta(seconds=min(1800, 60 * 2 ** (_mail_backoff["fails"] - 1)))
+            app.logger.warning("E-mail du contenu %s non envoyé : %s", r["id"], err)
+            break
+        note = _sent_note(recipients, refused)
+        db.execute("UPDATE slides SET mail_note=? WHERE id=?", (note, r["id"]))
+        _set_mail_status(db, True, f"« {_slide_label(r)} » : {note[0].lower()}{note[1:]}", now)
+        db.commit()
+        _mail_backoff.update(until=None, fails=0)
+        sent.append(r["id"])
+    return sent
+
+
+def _mail_loop():
+    while True:
+        time.sleep(MAIL_TICK)
+        try:
+            with app.app_context():
+                mail_tick()
+        except Exception:   # la tâche ne doit jamais s'arrêter
+            app.logger.exception("Envoi des e-mails")
+
+
+def start_mailer():
+    """Lance la tâche d'envoi des e-mails (une seule fois ; appelé par run.py)."""
+    global _mail_thread
+    if _mail_thread is None:
+        _mail_thread = threading.Thread(target=_mail_loop, name="comaxians-mail", daemon=True)
+        _mail_thread.start()
+
+
+def mark_live_as_handled(db, note: str, today: str | None = None) -> int:
+    """Contenus déjà en diffusion : considérés comme traités, sans envoi (activation de l'envoi, import).
+    Renvoie le nombre de ceux qui auraient été envoyés."""
+    today = today or date.today().isoformat()
+    stamp, n = datetime.now().isoformat(timespec="seconds"), 0
+    for r in db.execute("SELECT * FROM slides WHERE mailed_at=''").fetchall():
+        if is_live(r, today):
+            db.execute("UPDATE slides SET mailed_at=?, mail_note=? WHERE id=?", (stamp, note, r["id"]))
+            n += bool(r["mail_on_publish"]) and r["type"] != "anniversaire"
+    return n
+
+
+def _fmt_stamp(iso: str) -> str:
+    return f"le {iso[8:10]}/{iso[5:7]} à {iso[11:16]}" if len(iso) >= 16 else ""
+
+
+def mail_badge(r, settings: dict, now: datetime) -> dict | None:
+    """Pastille « ✉ » de la liste des contenus (None : rien à signaler)."""
+    if r["type"] == "anniversaire" or not r["mail_on_publish"]:
+        return None
+    note = r["mail_note"] or ""
+    if r["mailed_at"]:
+        if note.startswith("Envoyé"):
+            return {"text": f"✉ Envoyé {_fmt_stamp(r['mailed_at'])}", "cls": "ok", "title": note}
+        if note.startswith("Non envoyé : aucune adresse"):
+            return {"text": "✉ Non envoyé : aucune adresse", "cls": "warn",
+                    "title": note + " (section « E-mail à la publication »)"}
+        if note.startswith("Envoi en cours"):
+            return {"text": "✉ Envoi en cours…", "cls": "", "title": ""}
+        return None   # déjà en diffusion à l'activation de l'envoi, ou importé : pas d'envoi
+    if settings.get("mail_enabled") != "1":
+        return None
+    today = now.date().isoformat()
+    if is_live(r, today):
+        if note.startswith("Échec"):
+            return {"text": "✉ Échec de l'envoi · nouvel essai automatique", "cls": "err", "title": note}
+        due = mail_due(r)
+        return {"text": f"✉ Envoi prévu à {due:%H:%M}" if due > now else "✉ Envoi imminent", "cls": "",
+                "title": "L'e-mail part quelques minutes après l'enregistrement : vous pouvez encore corriger le contenu."}
+    if r["active"] and r["start_date"] and r["start_date"] > today and not (r["end_date"] and r["end_date"] < r["start_date"]):
+        return {"text": f"✉ Envoi le {r['start_date'][8:10]}/{r['start_date'][5:7]} à {MAIL_HOUR} h", "cls": "",
+                "title": "Envoyé le jour de sa date de début de diffusion."}
+    return None
+
+
+def mail_admin_info(settings: dict) -> dict:
+    """Données de la section « E-mail à la publication »."""
+    lists = mail_lists(settings)
+    rows = [{"key": e["name"], "label": e["name"], "color": e["color"]} for e in entity_list(settings)]
+    rows.append({"key": "", "label": "Contenus sans entité", "color": None})
+    for row in rows:
+        row["addrs"] = "\n".join(lists.get(row["key"].lower(), []))
+        row["count"] = len(lists.get(row["key"].lower(), []))
+    try:
+        status = json.loads(settings.get("mail_status") or "null")
+    except ValueError:
+        status = None
+    if isinstance(status, dict):
+        status["when"] = _fmt_stamp(str(status.get("time", "")))
+    return {"lists": rows, "status": status if isinstance(status, dict) else None,
+            "password_set": bool(settings.get("smtp_password")),
+            "password_env": bool(os.environ.get("COMAXIANS_SMTP_PASSWORD")),
+            "port": smtp_port(settings), "security": MAIL_SECURITY, "themes": MAIL_THEMES,
+            "config_error": mail_config_error(settings), "pillow": Image is not None,
+            "test_to": settings.get("mail_test_to", ""), "delay": MAIL_DELAY // 60, "hour": MAIL_HOUR}
+
+
+def mail_edit_hint(slide: dict) -> str:
+    """Explication sous la case « Envoyer par e-mail à la publication » (page de modification)."""
+    settings = get_settings()
+    mailed, note = slide.get("mailed_at") or "", slide.get("mail_note") or ""
+    if mailed and note.startswith("Envoyé"):
+        return f"{note} {_fmt_stamp(mailed)} : il ne sera pas renvoyé automatiquement."
+    if mailed and not note.startswith("Envoi en cours"):
+        return note + "."
+    if settings.get("mail_enabled") != "1":
+        return "L'envoi automatique est désactivé (section « E-mail à la publication » de la page des contenus)."
+    return (f"Envoyé une seule fois, {MAIL_DELAY // 60} minutes après sa mise en diffusion (à partir de "
+            f"{MAIL_HOUR} h le jour de sa date de début), aux adresses de ses entités.")
+
+
+app.jinja_env.globals["mail_edit_hint"] = mail_edit_hint
+
+
+def _sample_slide(settings: dict) -> dict:
+    """Contenu fictif de l'e-mail de test des paramètres."""
+    return {"id": None, "type": "message", "kicker": "Test d'envoi", "title": "L'envoi des e-mails fonctionne",
+            "body": "Ce message de test reprend la mise en forme des contenus envoyés à leur publication.",
+            "highlight": "", "highlight_label": "", "image": "", "counter_date": "",
+            "entities": ",".join(e["name"] for e in entity_list(settings))}
+
+
+def _send_test(r, settings: dict, to: str) -> bool:
+    """Envoi de test à une adresse ; message affiché dans l'admin. Renvoie True si l'envoi a réussi."""
+    db = get_db()
+    try:
+        refused = send_slide(r, settings, [to], test=True)
+    except Exception as e:
+        if not isinstance(e, (smtplib.SMTPException, OSError)):
+            app.logger.exception("E-mail de test")
+        err = mail_error_text(e)
+        _set_mail_status(db, False, f"Test vers {to} non envoyé : {err}")
+        db.commit()
+        flash(f"E-mail de test non envoyé : {err}.", "error")
+        return False
+    if refused:
+        flash(f"Adresse refusée par le serveur d'envoi : {to}.", "error")
+        return False
+    _set_mail_status(db, True, f"Test envoyé à {to}")
+    db.commit()
+    flash(f"E-mail de test envoyé à {to}. S'il n'arrive pas, regardez dans les courriers indésirables.", "ok")
+    return True
+
+
+@app.route("/admin/mail", methods=["POST"])
+@login_required
+def mail_settings_save():
+    f, db = request.form, get_db()
+    settings = get_settings()
+    lists, bad = {}, []
+    for key in f:
+        if key.startswith("to:"):
+            ok, wrong = parse_addresses(f.get(key, ""))
+            bad += wrong
+            if ok:
+                lists[key[3:].strip()[:30]] = ok
+    sec = f.get("smtp_security") if f.get("smtp_security") in MAIL_SECURITY else "starttls"
+    sender = f.get("mail_from", "").strip()[:254]
+    values = {
+        "mail_recipients": json.dumps(lists, ensure_ascii=False),
+        "smtp_host": re.sub(r"\s+", "", f.get("smtp_host", ""))[:200],
+        "smtp_security": sec,
+        "smtp_port": str(smtp_port({"smtp_security": sec, "smtp_port": f.get("smtp_port", "")})),
+        "smtp_user": f.get("smtp_user", "").strip()[:200],
+        "mail_from": sender if _EMAIL.match(sender) else "",
+        "mail_from_name": " ".join(f.get("mail_from_name", "").split())[:80],
+        "mail_theme": f.get("mail_theme") if f.get("mail_theme") in MAIL_THEMES else "dark",
+    }
+    test_to = f.get("test_to", "").strip()[:254]
+    if test_to:
+        values["mail_test_to"] = test_to
+    if not values["smtp_user"]:
+        values["smtp_password"] = ""          # relais sans authentification : pas de mot de passe gardé
+    elif f.get("smtp_password"):
+        values["smtp_password"] = f["smtp_password"][:500]   # champ vide : mot de passe inchangé
+    errors = []
+    if bad:
+        errors.append(f"Adresse{'s' if len(bad) > 1 else ''} ignorée{'s' if len(bad) > 1 else ''} (format invalide) : "
+                      + ", ".join(bad[:5]) + (" …" if len(bad) > 5 else "") + ".")
+    if sender and not values["mail_from"]:
+        errors.append(f"Adresse d'expédition invalide : {sender}.")
+    want, was_on = bool(f.get("mail_enabled")), settings.get("mail_enabled") == "1"
+    missing = mail_config_error(settings | values)
+    if want and missing:
+        errors.append(f"Envoi automatique non activé : {missing}.")
+        want = False
+    values["mail_enabled"] = "1" if want else "0"
+    for k, v in values.items():
+        db.execute("INSERT INTO settings(key, value) VALUES(?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (k, v))
+    skipped = mark_live_as_handled(db, "Non envoyé : déjà en diffusion à l'activation de l'envoi") if want and not was_on else 0
+    db.commit()
+    _mail_backoff.update(until=None, fails=0)   # nouveaux réglages : nouvel essai sans attendre
+    for e in errors:
+        flash(e, "error")
+    msg = "Paramètres d'envoi enregistrés."
+    if want and not was_on:
+        msg = "Envoi automatique activé : chaque nouveau contenu sera envoyé à sa publication."
+        if skipped:
+            msg += (f" {_plural(skipped, "contenu déjà en diffusion n'est pas envoyé", 'contenus déjà en diffusion ne sont pas envoyés')}"
+                    " (envoi manuel possible depuis l'aperçu de leur e-mail).")
+    elif was_on and not want and not missing:
+        msg = "Envoi automatique désactivé."
+    flash(msg, "ok")
+    if f.get("action") == "test":
+        if not _EMAIL.match(test_to):
+            flash("Indiquez l'adresse qui doit recevoir l'e-mail de test.", "error")
+        elif missing:
+            flash(f"E-mail de test non envoyé : {missing}.", "error")
+        else:
+            _send_test(_sample_slide(settings | values), get_settings(), test_to)
+    return redirect(url_for("admin") + "#mail")
+
+
+def _slide_or_404(sid: int):
+    row = get_db().execute("SELECT * FROM slides WHERE id=?", (sid,)).fetchone()
+    if not row:
+        abort(404)
+    return row
+
+
+@app.route("/admin/slides/<int:sid>/mail")
+@login_required
+def slide_mail(sid):
+    """Aperçu de l'e-mail d'un contenu, destinataires, état ; envoi de test ou envoi manuel."""
+    row, settings = _slide_or_404(sid), get_settings()
+    v = mail_view(row, settings)
+    recipients, names = slide_recipients(row, settings)
+    sender = (formataddr((settings.get("mail_from_name") or f"{v['site_name']} Affichage", settings["mail_from"]))
+              if settings.get("mail_from") else "")
+    return render_template("mail_preview.html", slide=dict(row), v=v, recipients=recipients, names=names,
+                           sender=sender, warnings=mail_warnings(v, mail_assets(v)), badge=mail_badge(row, settings, datetime.now()),
+                           mail=mail_admin_info(settings), settings=public_settings(settings), types=SLIDE_TYPES)
+
+
+@app.route("/admin/slides/<int:sid>/mail/apercu")
+@login_required
+def slide_mail_html(sid):
+    v = mail_view(_slide_or_404(sid), get_settings())
+    resp = app.response_class(render_mail_html(v, mail_assets(v)), mimetype="text/html")
+    resp.headers["Content-Security-Policy"] = "default-src 'none'; img-src data:; style-src 'unsafe-inline'"
+    resp.headers["Cache-Control"] = "no-store"
+    return resp
+
+
+@app.route("/admin/slides/<int:sid>/mail/envoyer", methods=["POST"])
+@login_required
+def slide_mail_send(sid):
+    row, settings, db = _slide_or_404(sid), get_settings(), get_db()
+    back = redirect(url_for("slide_mail", sid=sid))
+    missing = mail_config_error(settings)
+    if missing:
+        flash(f"Envoi impossible : {missing} (section « E-mail à la publication » de la page des contenus).", "error")
+        return back
+    if request.form.get("mode") == "test":
+        to = request.form.get("test_to", "").strip()[:254]
+        if not _EMAIL.match(to):
+            flash("Indiquez l'adresse qui doit recevoir l'e-mail de test.", "error")
+            return back
+        db.execute("INSERT INTO settings(key, value) VALUES('mail_test_to', ?) "
+                   "ON CONFLICT(key) DO UPDATE SET value=excluded.value", (to,))
+        db.commit()
+        _send_test(row, settings, to)
+        return back
+    recipients, names = slide_recipients(row, settings)
+    if not recipients:
+        flash("Aucune adresse pour " + (", ".join(names) if names else "les contenus sans entité")
+              + " : complétez la section « E-mail à la publication » de la page des contenus.", "error")
+        return back
+    try:
+        refused = send_slide(row, settings, recipients)
+    except Exception as e:
+        if not isinstance(e, (smtplib.SMTPException, OSError)):
+            app.logger.exception("E-mail du contenu %s", sid)
+        err = mail_error_text(e)
+        _set_mail_status(db, False, f"« {_slide_label(row)} » non envoyé : {err}")
+        db.commit()
+        flash(f"E-mail non envoyé : {err}.", "error")
+        return back
+    note = _sent_note(recipients, refused)
+    db.execute("UPDATE slides SET mailed_at=?, mail_note=? WHERE id=?",
+               (datetime.now().isoformat(timespec="seconds"), note, sid))
+    _set_mail_status(db, True, f"« {_slide_label(row)} » : {note[0].lower()}{note[1:]}")
+    db.commit()
+    flash(f"E-mail {note[0].lower()}{note[1:]}.", "ok")
+    return back
 
 
 # ------------------------------------------------------- sauvegarde : export / import
@@ -1084,7 +1880,8 @@ def write_export(dest) -> dict:
     db = get_db()
     slides = [{k: r[k] for k in r.keys() if k != "id"}
               for r in db.execute("SELECT * FROM slides ORDER BY position, id")]
-    settings = {r["key"]: r["value"] for r in db.execute("SELECT key, value FROM settings")}
+    settings = {r["key"]: r["value"] for r in db.execute("SELECT key, value FROM settings")
+                if r["key"] not in LOCAL_SETTINGS}   # ni le mot de passe SMTP ni l'état de l'envoi
     screens = [{"name": r["name"], "theme": r["theme"] or ""}
                for r in db.execute("SELECT name, theme FROM screens ORDER BY name")]
     media = _used_media(db)
@@ -1164,6 +1961,8 @@ def _prepare_import(z: zipfile.ZipFile, data: dict) -> dict:
             elif isinstance(v, (int, float)):
                 row[c] = v
         row["title"] = row.get("title") or ""
+        if "mail_on_publish" not in s:   # sauvegarde antérieure à l'envoi par e-mail
+            row["mail_on_publish"] = 0 if row["type"] in ("video", "anniversaire") else 1
         img = row.get("image", "")
         if img and _media_ok(img) and f"uploads/{img}" in names:
             media[img] = z.getinfo(f"uploads/{img}")
@@ -1176,6 +1975,8 @@ def _prepare_import(z: zipfile.ZipFile, data: dict) -> dict:
     settings = {}
     if isinstance(data.get("settings"), dict):
         for k, v in data["settings"].items():
+            if k in LOCAL_SETTINGS:   # propres à ce serveur : conservés tels quels
+                continue
             if _SETTING_KEY.match(str(k)) and isinstance(v, (str, int, float)) and not isinstance(v, bool):
                 settings[k] = str(v)[:20_000]
     screens = {}
@@ -1229,10 +2030,12 @@ def _apply_import(z: zipfile.ZipFile, prep: dict):
             row = {"updated_at": now} | row | {"position": pos, "image": mapping.get(row.get("image", ""), "")}
             db.execute(f"INSERT INTO slides({', '.join(row)}) VALUES ({', '.join('?' * len(row))})",
                        list(row.values()))
-        # Paramètres absents du fichier : valeur par défaut
-        for k in DEFAULT_SETTINGS.keys() | prep["settings"].keys():
+        # Paramètres absents du fichier : valeur par défaut (sauf ceux propres à ce serveur, conservés)
+        for k in (DEFAULT_SETTINGS.keys() | prep["settings"].keys()) - LOCAL_SETTINGS:
             db.execute("INSERT INTO settings(key, value) VALUES(?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
                        (k, prep["settings"].get(k, DEFAULT_SETTINGS.get(k))))
+        # Contenus déjà en diffusion : pas d'e-mail (ils ont été publiés avant, sur l'autre serveur)
+        mark_live_as_handled(db, "Non envoyé : contenu importé déjà en diffusion")
         # Écrans : thèmes du fichier ; les écrans qui n'y sont pas réapparaîtront d'eux-mêmes
         names = list(prep["screens"])
         db.execute(f"DELETE FROM screens WHERE name NOT IN ({', '.join('?' * len(names))})", names)

@@ -250,6 +250,11 @@ log "[Serveur] Environnement Python"
 if [[ -x $APP_DIR/.venv/bin/python ]]; then info "environnement existant réutilisé"
 else run sudo python3 -m venv "$APP_DIR/.venv"; fi
 run sudo "$APP_DIR/.venv/bin/pip" install --quiet --disable-pip-version-check --upgrade -r "$APP_DIR/requirements.txt"
+# Pillow (facultatif) : images des e-mails converties en JPEG/PNG (Outlook n'affiche pas le WebP),
+# allégées, portrait arrondi. Son absence n'empêche ni l'installation ni l'envoi des e-mails.
+if ! run sudo "$APP_DIR/.venv/bin/pip" install --quiet --disable-pip-version-check --upgrade "Pillow>=9.1"; then
+  warn "Pillow non installé : les images WebP ne seront pas jointes aux e-mails (le reste fonctionne)"
+fi
 
 log "[Serveur] Données (base + images) dans $DATA_DIR"
 if [[ $UPDATE == 1 ]]; then

@@ -153,6 +153,11 @@
         <input name="screens" value="{{ slide.screens or '' }}" placeholder="Ex. : accueil, cafeteria">
       </label>
       <label class="check"><input type="checkbox" name="active" {% if slide.active %}checked{% endif %}> Diapositive active</label>
+      <div class="span3 f-mail">
+        <label class="check"><input type="checkbox" name="mail_on_publish" {% if slide.mail_on_publish %}checked{% endif %}> ✉ Envoyer par e-mail à la publication</label>
+        <p class="muted small">{{ mail_edit_hint(slide) }}
+          {%- if slide.id %} <a href="{{ url_for('slide_mail', sid=slide.id) }}">Aperçu de l'e-mail et envoi manuel →</a>{% endif %}</p>
+      </div>
     </div>
   </details>
 
@@ -190,6 +195,7 @@
     // Chiffre clé : valeur fixe ou compteur de jours depuis une date
     const isCounter = t === 'chiffre' && document.querySelector('input[name=counter_mode]:checked')?.value === 'days';
     document.querySelector('.f-counter').hidden = t !== 'chiffre';
+    document.querySelector('.f-mail').hidden = t === 'anniversaire';   // contenu quotidien : jamais envoyé
     document.querySelector('.f-days').hidden = !isCounter;
     document.querySelector('.f-value').hidden = !hl || isCounter;
     document.getElementById('counter-date').required = isCounter;

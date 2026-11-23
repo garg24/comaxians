@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+{% block title %}E-mail – {{ v.subject }}{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <a href="{{ url_for('admin') }}" class="muted small">← Retour aux contenus</a>
+    <h1>Aperçu de l'e-mail</h1>
+    <p class="muted">Tel qu'il est envoyé à la publication du contenu. <a href="{{ url_for('slide_edit', sid=slide.id) }}">Modifier le contenu</a></p>
+  </div>
+</div>
+
+<div class="mail-layout">
+  <section class="card mail-meta">
+    <dl>
+      <dt>Objet</dt><dd><strong>{{ v.subject }}</strong></dd>
+      <dt>Expéditeur</dt><dd>{{ sender or '— à configurer' }}</dd>
+      <dt>Destinataires</dt>
+      <dd>
+        {% if recipients %}
+          {{ recipients|length }} adresse{{ 's' if recipients|length > 1 }} ({{ names|join(', ') if names else 'contenus sans entité' }}), en copie cachée
+          <details class="mail-recipients"><summary>Voir la liste</summary><p class="small">{{ recipients|join(', ') }}</p></details>
+        {% else %}
+          <span class="warn-text">Aucune adresse pour {{ names|join(', ') if names else 'les contenus sans entité' }}</span>
+        {% endif %}
+      </dd>
+      <dt>État</dt>
+      <dd>
+        {% if not slide.mail_on_publish or slide.type == 'anniversaire' %}Pas d'envoi automatique pour ce contenu
+        {% elif badge %}<span class="mail-pill {{ badge.cls }}">{{ badge.text }}</span>{% if badge.title and badge.cls != 'ok' %}<br><span class="muted small">{{ badge.title }}</span>{% endif %}
+        {% elif slide.mail_note %}{{ slide.mail_note }}
+        {% elif settings.mail_enabled != '1' %}Envoi automatique désactivé
+        {% else %}Envoyé à sa prochaine mise en diffusion{% endif %}
+      </dd>
+    </dl>
+    {% for w in warnings %}<p class="small warn">{{ w }}</p>{% endfor %}
+    {% if mail.config_error %}
+      <p class="small warn">Envoi impossible pour l'instant : {{ mail.config_error }} (section <a href="{{ url_for('admin') }}#mail">« E-mail à la publication »</a>).</p>
+    {% endif %}
+
+    <form method="post" action="{{ url_for('slide_mail_send', sid=slide.id) }}" class="mail-send">
+      <input type="hidden" name="csrf" value="{{ csrf_token() }}">
+      <input type="hidden" name="mode" value="test">
+      <label>Recevoir un test <input type="email" name="test_to" required value="{{ mail.test_to }}" placeholder="votre adresse"></label>
+      <button class="btn" {% if mail.config_error %}disabled{% endif %}>Envoyer un test</button>
+    </form>
+    <form method="post" action="{{ url_for('slide_mail_send', sid=slide.id) }}" class="mail-send"
+          data-confirm="Confirmer : envoyer à {{ recipients|length }} destinataire{{ 's' if recipients|length > 1 }} ?">
+      <input type="hidden" name="csrf" value="{{ csrf_token() }}">
+      <input type="hidden" name="mode" value="all">
+      <button class="btn btn-primary" {% if mail.config_error or not recipients %}disabled{% endif %}>
+        ✉ {{ 'Renvoyer' if slide.mail_note.startswith('Envoyé') else 'Envoyer maintenant' }} à {{ recipients|length }} destinataire{{ 's' if recipients|length > 1 }}</button>
+    </form>
+    <p class="muted small">L'envoi manuel part tout de suite, que le contenu soit diffusé ou non, et compte comme son envoi à la publication.</p>
+  </section>
+
+  <section class="mail-frame">
+    <div class="seg-ctl" role="group" aria-label="Largeur de l'aperçu">
+      <label><input type="radio" name="frame-width" value="" checked><span>🖥 Ordinateur</span></label>
+      <label><input type="radio" name="frame-width" value="390"><span>📱 Téléphone</span></label>
+    </div>
+    <iframe id="mail-frame" src="{{ url_for('slide_mail_html', sid=slide.id) }}" title="Aperçu de l'e-mail"></iframe>
+  </section>
+</div>
+<script>
+  (() => {
+    const frame = document.getElementById('mail-frame');
+    // Hauteur du cadre ajustée au contenu de l'e-mail (pas de double barre de défilement)
+    const fit = () => {
+      try { frame.style.height = (frame.contentDocument.documentElement.scrollHeight + 4) + 'px'; } catch (e) {}
+    };
+    frame.addEventListener('load', () => { fit(); setTimeout(fit, 300); });
+    document.querySelectorAll('input[name=frame-width]').forEach((r) => r.addEventListener('change', () => {
+      frame.style.width = r.value ? r.value + 'px' : '';
+      frame.style.height = '400px';
+      setTimeout(fit, 50);
+    }));
+  })();
+</script>
+{% endblock %}

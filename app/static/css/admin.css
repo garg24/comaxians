@@ -49,6 +49,8 @@ code { background: var(--page); border: 1px solid var(--line); padding: 2px 6px;
 .btn-danger:hover { border-color: #E11D48; color: #E11D48; }
 .icon { width: 34px; height: 34px; border: 1px solid var(--line); background: #fff; border-radius: 10px; cursor: pointer; color: var(--ink-2); font-size: 16px; }
 .icon:disabled { opacity: .3; cursor: default; }
+.btn:disabled { opacity: .45; cursor: not-allowed; }
+.btn:disabled:hover { border-color: var(--line); }
 /* Bouton « armé » : 2e clic pour confirmer */
 .btn-confirm, .btn-confirm:hover {
   background: #E11D48 !important; border-color: #E11D48 !important; color: #fff !important;
@@ -129,7 +131,7 @@ a.chip:hover { border-color: var(--c); }
 
 label { display: block; font-weight: 600; font-size: 14px; }
 label .small { font-weight: 400; }
-input[type=text], input:not([type]), input[type=password], input[type=number], input[type=date], textarea {
+input[type=text], input:not([type]), input[type=password], input[type=number], input[type=date], input[type=email], select, textarea {
   display: block; width: 100%; margin-top: 6px;
   font: inherit; font-weight: 400; padding: 11px 14px; border: 1px solid var(--line); border-radius: 12px; background: #fff; color: var(--ink);
 }
@@ -338,3 +340,45 @@ textarea { resize: vertical; }
   .appbar nav a { padding: 6px 10px; font-size: 14px; }
   .appbar nav a.cta { margin-left: auto; }
 }
+
+/* E-mail à la publication */
+#mail { scroll-margin-top: 90px; }
+.flash-slot:empty { display: none; }
+.flash-slot .flash:last-child { margin-bottom: 18px; }
+.mail-switch { font-size: 15px; }
+.mail-lists { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 14px 18px; }
+.mail-list-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.mail-list-head .ent-mini { font-size: 14px; color: var(--ink); }
+.mail-noent { font-size: 14px; font-weight: 600; color: var(--ink-2); }
+.mail-list textarea { font-size: 14px; }
+.smtp { border: 1px solid var(--line); border-radius: 14px; padding: 14px 18px; }
+.smtp summary { cursor: pointer; font-weight: 600; }
+.smtp summary .muted { font-weight: 400; }
+.smtp > p { margin: 14px 0 0; }
+.mail-actions { display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: center; justify-content: space-between; }
+.mail-test { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.mail-test input { margin-top: 0; width: 240px; max-width: 100%; padding: 8px 12px; }
+.mail-status { margin: 0; padding: 10px 14px; border-radius: 10px; }
+.mail-status.ok { background: #E8F8EE; color: #166534; }
+.mail-status.err { background: #FDECF3; color: #BE185D; }
+.mail-pill { font-size: 13px; font-weight: 600; color: #1D4ED8; background: #EAF1FF; padding: 2px 10px; border-radius: 999px; text-decoration: none; }
+.mail-pill:hover { text-decoration: underline; }
+.mail-pill.ok { color: #166534; background: #E8F8EE; }
+.mail-pill.warn { color: #B45309; background: #FEF3E2; }
+.mail-pill.err { color: #BE185D; background: #FDECF3; }
+.f-mail p { margin: 4px 0 0 26px; }
+.warn-text { color: #B45309; font-weight: 600; }
+/* Page d'aperçu de l'e-mail */
+.mail-layout { display: grid; grid-template-columns: minmax(280px, 360px) 1fr; gap: 24px; align-items: start; }
+.mail-meta { display: flex; flex-direction: column; gap: 14px; padding: 22px; position: sticky; top: 90px; }
+.mail-meta dl { margin: 0; display: grid; grid-template-columns: auto 1fr; gap: 8px 14px; font-size: 14px; }
+.mail-meta dt { color: var(--muted); }
+.mail-meta dd { margin: 0; overflow-wrap: anywhere; }
+.mail-meta p { margin: 0; }
+.mail-recipients summary { cursor: pointer; font-size: 13px; color: var(--ink-2); }
+.mail-recipients p { margin: 6px 0 0; color: var(--ink-2); }
+.mail-send { display: flex; flex-direction: column; gap: 8px; align-items: flex-start; margin: 0; }
+.mail-send label { width: 100%; }
+.mail-frame { display: flex; flex-direction: column; gap: 12px; align-items: center; min-width: 0; }
+.mail-frame iframe { width: 100%; height: 600px; border: 1px solid var(--line); border-radius: 18px; background: #fff; transition: width .25s ease; }
+@media (max-width: 960px) { .mail-layout { grid-template-columns: 1fr; } .mail-meta { position: static; } }

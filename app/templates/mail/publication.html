@@ -1,0 +1,214 @@
+{#- E-mail envoyé à la publication d'un contenu : même mise en forme que sur les écrans.
+    Tableaux et styles en ligne, couleurs opaques : lu correctement par Outlook (Windows), Gmail, Apple Mail…
+    Variables : v (contenu, cf. mail_view), c (couleurs), img (logo, media : src, w, h, kind), F (police). -#}
+{%- macro tags(v, c, F, center=false) -%}
+{%- if v.kicker or v.entities -%}
+<table role="presentation" cellpadding="0" cellspacing="0" border="0"{% if center %} align="center"{% endif %} style="margin:0 0 10px;">
+  <tr>
+    {%- if v.kicker %}
+    <td style="padding:0 8px 8px 0;">
+      <table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr>
+        <td bgcolor="{{ c.tag_bg }}" style="background:{{ c.tag_bg }};border:1px solid {{ c.tag_line }};border-radius:999px;padding:6px 14px 6px 12px;{{ F }}font-size:13px;line-height:16px;font-weight:600;color:{{ c.text }};white-space:nowrap;"><span style="color:{{ c.accent }};">&#9679;</span>&nbsp; {{ v.kicker }}</td>
+      </tr></table>
+    </td>
+    {%- endif %}
+    {%- for e in v.entities %}
+    <td style="padding:0 8px 8px 0;">
+      <table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr>
+        <td bgcolor="{{ c.glass }}" style="background:{{ c.glass }};border:1px solid {{ c.line }};border-radius:999px;padding:6px 14px 6px 12px;{{ F }}font-size:13px;line-height:16px;font-weight:700;color:{{ c.text }};white-space:nowrap;"><span style="color:{{ e.color }};">&#9632;</span>&nbsp; {{ e.name }}</td>
+      </tr></table>
+    </td>
+    {%- endfor %}
+  </tr>
+</table>
+{%- endif -%}
+{%- endmacro -%}
+{%- macro title(v, c, F, align="left") -%}
+{%- if v.title %}<h1 class="h1" align="{{ align }}" style="margin:0;{{ F }}font-size:30px;line-height:36px;font-weight:800;letter-spacing:-0.5px;color:{{ c.text }};text-align:{{ align }};">{{ v.title }}</h1>{% endif -%}
+{%- endmacro -%}
+{%- macro body(v, c, F, align="left", quote=false) -%}
+{%- if v.body %}<p style="margin:14px 0 0;{{ F }}font-size:16px;line-height:25px;color:{{ c.dim }};text-align:{{ align }};{% if quote %}font-style:italic;{% endif %}">{% if quote %}&#8220;{% endif %}{{ v.body_html }}{% if quote %}&#8221;{% endif %}</p>{% endif -%}
+{%- endmacro -%}
+{%- set media = img.get('media') -%}
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="x-apple-disable-message-reformatting">
+<meta name="color-scheme" content="{{ c.scheme }}">
+<meta name="supported-color-schemes" content="{{ c.scheme }}">
+<title>{{ v.subject }}</title>
+<!--[if mso]><style>table, td, div, p, h1 { font-family: Segoe UI, Arial, sans-serif !important; }</style><![endif]-->
+<style>
+  body { margin: 0; padding: 0; width: 100% !important; -webkit-text-size-adjust: 100%; }
+  table { border-collapse: collapse; }
+  img { border: 0; outline: none; text-decoration: none; -ms-interpolation-mode: bicubic; }
+  @media screen and (max-width: 620px) {
+    .wrap { width: 100% !important; }
+    .px { padding-left: 22px !important; padding-right: 22px !important; }
+    .h1 { font-size: 25px !important; line-height: 31px !important; }
+    .big { font-size: 56px !important; line-height: 60px !important; }
+    .stack { display: block !important; width: 100% !important; }
+    .stack-gap { padding: 0 0 20px 0 !important; }
+  }
+</style>
+</head>
+<body style="margin:0;padding:0;background:{{ c.page }};" bgcolor="{{ c.page }}">
+<div style="display:none;max-height:0;overflow:hidden;mso-hide:all;font-size:1px;line-height:1px;color:{{ c.page }};">{{ (v.body or v.highlight_label or v.title) | truncate(140) }}</div>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="{{ c.page }}" style="background:{{ c.page }};">
+<tr><td align="center" style="padding:28px 10px 36px;">
+<!--[if mso]><table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0"><tr><td><![endif]-->
+<table role="presentation" class="wrap" width="600" cellpadding="0" cellspacing="0" border="0" style="width:600px;max-width:600px;">
+
+  {#- En-tête : logo et date, comme le haut des écrans #}
+  <tr><td style="padding:0 4px 16px;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
+      <td align="left" valign="middle">
+        {%- if img.logo %}<img src="{{ img.logo.src }}" width="{{ img.logo.w }}" height="{{ img.logo.h }}" alt="Axians" style="display:block;width:{{ img.logo.w }}px;height:{{ img.logo.h }}px;">
+        {%- else %}<span style="{{ F }}font-size:26px;line-height:26px;font-weight:800;letter-spacing:-0.5px;color:{{ c.text }};">axians</span>{% endif -%}
+      </td>
+      <td align="right" valign="middle" style="{{ F }}font-size:13px;line-height:18px;color:{{ c.dim }};">{{ v.date_label }}</td>
+    </tr></table>
+  </td></tr>
+
+  {#- Carte du contenu #}
+  <tr><td bgcolor="{{ c.card }}" style="background:{{ c.card }};border:1px solid {{ c.line }};border-radius:22px;overflow:hidden;">
+
+  {%- if v.type == 'image' and media %}
+    {#- Affiche déjà mise en page : l'image seule #}
+    <img src="{{ media.src }}" width="598"{% if media.h %} height="{{ media.h }}"{% endif %} alt="{{ v.title }}" style="display:block;width:100%;max-width:598px;height:auto;border-radius:21px;">
+  {%- else %}
+    {#- Liseré dégradé aux couleurs du type de contenu #}
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
+      <td height="6" bgcolor="{{ c.accent }}" style="height:6px;font-size:0;line-height:0;background:{{ c.accent }};background-image:linear-gradient(90deg,{{ c.accent }},{{ c.accent2 }});border-radius:21px 21px 0 0;">&nbsp;</td>
+    </tr></table>
+
+    {%- if media and media.kind == 'hero' %}
+    <img src="{{ media.src }}" width="598"{% if media.h %} height="{{ media.h }}"{% endif %} alt="" style="display:block;width:100%;max-width:598px;height:auto;">
+    {%- elif v.has_video %}
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
+      <td align="center" bgcolor="{{ c.tag_bg }}" style="background:{{ c.tag_bg }};padding:44px 20px 40px;">
+        <table role="presentation" cellpadding="0" cellspacing="0" border="0" align="center"><tr>
+          <td align="center" valign="middle" width="64" height="64" bgcolor="{{ c.accent }}" style="width:64px;height:64px;border-radius:32px;background:{{ c.accent }};{{ F }}font-size:24px;line-height:64px;color:#FFFFFF;">&#9654;</td>
+        </tr></table>
+        <p style="margin:14px 0 0;{{ F }}font-size:14px;line-height:20px;font-weight:600;color:{{ c.text }};">Vidéo à découvrir sur les écrans d'affichage</p>
+      </td>
+    </tr></table>
+    {%- endif %}
+
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
+    <td class="px" style="padding:30px 36px 34px;">
+
+    {%- if v.type == 'partenaire' %}
+      {%- if media %}
+      <table role="presentation" cellpadding="0" cellspacing="0" border="0" align="center" style="margin:0 auto 26px;"><tr>
+        <td align="center" bgcolor="#FFFFFF" style="background:#FFFFFF;border:1px solid {{ c.line }};border-radius:18px;padding:24px 32px;">
+          <img src="{{ media.src }}" width="{{ media.w or 200 }}"{% if media.h %} height="{{ media.h }}"{% endif %} alt="{{ v.title }}" style="display:block;max-width:260px;height:auto;">
+        </td>
+      </tr></table>
+      {%- endif %}
+      {{ tags(v, c, F) }}
+      {{ title(v, c, F) }}
+      {{ body(v, c, F) }}
+
+    {%- elif v.type == 'evenement' %}
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
+        {%- if v.highlight %}
+        <td class="stack stack-gap" width="128" valign="top" style="width:128px;padding-right:26px;">
+          <table role="presentation" width="128" cellpadding="0" cellspacing="0" border="0" style="width:128px;">
+            <tr><td height="6" bgcolor="{{ c.accent }}" style="height:6px;font-size:0;line-height:0;background:{{ c.accent }};background-image:linear-gradient(90deg,{{ c.accent }},{{ c.accent2 }});border-radius:16px 16px 0 0;">&nbsp;</td></tr>
+            <tr><td align="center" bgcolor="{{ c.glass }}" style="background:{{ c.glass }};border:1px solid {{ c.line }};border-top:0;border-radius:0 0 16px 16px;padding:14px 6px 16px;">
+              <div class="big" style="{{ F }}font-size:56px;line-height:60px;font-weight:800;letter-spacing:-2px;color:{{ c.accent_text }};">{{ v.highlight }}</div>
+              {%- if v.highlight_label %}
+              <div style="{{ F }}font-size:12px;line-height:16px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:{{ c.text }};">{{ v.highlight_label }}</div>
+              {%- endif %}
+            </td></tr>
+          </table>
+        </td>
+        {%- endif %}
+        <td class="stack" valign="top">
+          {{ tags(v, c, F) }}
+          {{ title(v, c, F) }}
+          {{ body(v, c, F) }}
+        </td>
+      </tr></table>
+
+    {%- elif v.type == 'employe' %}
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+        <tr><td align="center">
+          {%- if media %}
+          <img src="{{ media.src }}" width="180" height="180" alt="{{ v.title }}" style="display:block;width:180px;height:180px;{% if not media.w %}border-radius:90px;object-fit:cover;{% endif %}">
+          {%- else %}
+          <table role="presentation" cellpadding="0" cellspacing="0" border="0" align="center"><tr>
+            <td align="center" valign="middle" width="150" height="150" bgcolor="{{ c.accent }}" style="width:150px;height:150px;border-radius:75px;background:{{ c.accent }};background-image:linear-gradient(135deg,{{ c.accent }},{{ c.accent2 }});{{ F }}font-size:54px;line-height:150px;font-weight:800;color:#FFFFFF;">{{ v.initials or '★' }}</td>
+          </tr></table>
+          {%- endif %}
+          {%- if v.highlight %}
+          <table role="presentation" cellpadding="0" cellspacing="0" border="0" align="center" style="margin:14px auto 0;"><tr>
+            <td bgcolor="{{ c.contrast }}" style="background:{{ c.contrast }};border-radius:999px;padding:8px 18px;{{ F }}font-size:14px;line-height:18px;font-weight:800;color:{{ c.contrast_text }};white-space:nowrap;">&#9733; {{ v.highlight }}</td>
+          </tr></table>
+          {%- endif %}
+        </td></tr>
+        <tr><td align="center" style="padding-top:24px;">
+          {{ tags(v, c, F, true) }}
+          {{ title(v, c, F, "center") }}
+          {%- if v.highlight_label %}
+          <p style="margin:8px 0 0;{{ F }}font-size:19px;line-height:25px;font-weight:700;color:{{ c.accent_text }};text-align:center;">{{ v.highlight_label }}</p>
+          {%- endif %}
+          {{ body(v, c, F, "center", quote=true) }}
+        </td></tr>
+      </table>
+
+    {%- elif v.type == 'chiffre' %}
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr><td align="center">
+        {{ tags(v, c, F, true) }}
+        <div class="big" style="{{ F }}font-size:76px;line-height:84px;font-weight:800;letter-spacing:-3px;color:{{ c.accent_text }};text-align:center;">{{ v.value }}</div>
+        <p style="margin:4px 0 0;{{ F }}font-size:20px;line-height:27px;font-weight:700;color:{{ c.text }};text-align:center;">{{ v.title }}{% if v.highlight_label %} · {{ v.highlight_label }}{% endif %}</p>
+        {{ body(v, c, F, "center") }}
+      </td></tr></table>
+
+    {%- elif v.type == 'message' %}
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr><td align="center">
+        <div style="{{ F }}font-size:84px;line-height:60px;height:52px;font-weight:800;color:{{ c.accent_text }};text-align:center;">&#8220;</div>
+        {{ title(v, c, F, "center") }}
+        {%- if v.kicker or v.entities %}<div style="height:16px;line-height:16px;font-size:0;">&nbsp;</div>{% endif %}
+        {{ tags(v, c, F, true) }}
+        {{ body(v, c, F, "center") }}
+      </td></tr></table>
+
+    {%- else %}
+      {#- Succès, actualité, vidéo (et affiche sans image) : texte, puis chiffre clé #}
+      {{ tags(v, c, F) }}
+      {{ title(v, c, F) }}
+      {{ body(v, c, F) }}
+      {%- if v.highlight and v.type in ('succes', 'actualite') %}
+      <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin-top:22px;"><tr>
+        <td bgcolor="{{ c.glass }}" style="background:{{ c.glass }};border:1px solid {{ c.line }};border-radius:18px;padding:14px 22px 14px 20px;">
+          <table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr>
+            <td valign="middle" style="{{ F }}font-size:40px;line-height:46px;font-weight:800;letter-spacing:-1px;color:{{ c.accent_text }};white-space:nowrap;">{{ v.highlight }}</td>
+            {%- if v.highlight_label %}
+            <td valign="middle" style="padding-left:16px;{{ F }}font-size:14px;line-height:19px;color:{{ c.dim }};">{{ v.highlight_label }}</td>
+            {%- endif %}
+          </tr></table>
+        </td>
+      </tr></table>
+      {%- endif %}
+    {%- endif %}
+
+    </td>
+    </tr></table>
+  {%- endif %}
+  </td></tr>
+
+  {#- Pied de page #}
+  <tr><td align="center" style="padding:20px 16px 0;{{ F }}font-size:12px;line-height:18px;color:{{ c.dim }};">
+    Publié sur les écrans d'affichage {{ v.site_name }}<br>
+    Message envoyé automatiquement à la publication de ce contenu.
+  </td></tr>
+</table>
+<!--[if mso]></td></tr></table><![endif]-->
+</td></tr>
+</table>
+</body>
+</html>

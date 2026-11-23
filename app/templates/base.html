@@ -51,6 +51,11 @@
       if (openUpdate()) { e.preventDefault(); history.replaceState(null, '', '#maj'); }
     });
     if (location.hash === '#maj') openUpdate();
+    // Message après l'enregistrement d'une section (ex. #mail) : affiché dans la section, là où la page s'ouvre
+    try {
+      const slot = location.hash && document.querySelector(location.hash + ' .flash-slot');
+      if (slot) document.querySelectorAll('main > .flash').forEach((f) => slot.append(f));
+    } catch (e) { /* ancre qui n'est pas un sélecteur valide */ }
     // Confirmation en deux clics, dans la page : fonctionne même dans les navigateurs qui
     // bloquent les boîtes de dialogue (confirm() renvoie alors « Annuler » sans rien afficher).
     document.addEventListener('submit', (e) => {

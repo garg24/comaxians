@@ -57,6 +57,7 @@
             {%- if s.bday.next %} · prochain : {{ s.bday.next | join(', ') }} le {{ s.bday.next_date }}{% endif %}</span>
         {% endif %}
         {% if s.start_date or s.end_date %}<span class="muted small">{{ s.start_date or '…' }} → {{ s.end_date or '…' }}</span>{% endif %}
+        {% if s.mail %}<a class="mail-pill {{ s.mail.cls }}" href="{{ url_for('slide_mail', sid=s.id) }}" title="{{ s.mail.title }}">{{ s.mail.text }}</a>{% endif %}
         {% if s.screens %}<span class="muted small">Écrans : {{ s.screens }}</span>{% endif %}
       </div>
       <h3>{{ s.title or (types.get(s.type) ~ ' sans titre') }}</h3>
@@ -123,6 +124,104 @@
     </label>
     <div class="span2"><button class="btn btn-primary">Enregistrer les paramètres</button></div>
   </form>
+</section>
+
+<section class="card settings" id="mail">
+  <h2>E-mail à la publication</h2>
+  <p class="muted small" style="margin-top:-8px">Chaque nouveau contenu est envoyé une seule fois par e-mail, avec sa mise en forme, quand il commence
+    à être diffusé : {{ mail.delay }} minutes après son enregistrement (le temps de corriger une coquille), ou à partir de {{ mail.hour }} h
+    le jour de sa date de début. Il part aux adresses de ses entités. Les anniversaires ne sont jamais envoyés ; pour un autre contenu,
+    décochez « Envoyer par e-mail à la publication » dans sa page.</p>
+  <div class="flash-slot"></div>
+  <form method="post" action="{{ url_for('mail_settings_save') }}" class="grid2" autocomplete="off">
+    <input type="hidden" name="csrf" value="{{ csrf_token() }}">
+    <label class="check span2 mail-switch"><input type="checkbox" name="mail_enabled" {% if settings.mail_enabled == '1' %}checked{% endif %}>
+      <strong>Envoyer automatiquement les nouveaux contenus par e-mail</strong></label>
+
+    <div class="span2">
+      <span class="field-label">Destinataires par entité <span class="muted small" style="font-weight:400">(une adresse par ligne, ou séparées par des virgules ; une liste copiée depuis Outlook convient)</span></span>
+      <div class="mail-lists">
+        {% for l in mail.lists %}
+        <label class="mail-list">
+          <span class="mail-list-head">
+            {% if l.color %}<span class="ent-mini" style="--ec: {{ l.color }}">{{ l.label }}</span>{% else %}<span class="mail-noent">{{ l.label }}</span>{% endif %}
+            <span class="muted small">{{ l.count }} adresse{{ 's' if l.count > 1 }}</span>
+          </span>
+          <textarea name="to:{{ l.key }}" rows="3" placeholder="prenom.nom@axians.fr" spellcheck="false">{{ l.addrs }}</textarea>
+        </label>
+        {% endfor %}
+      </div>
+      <p class="muted small">Un contenu de plusieurs entités part aux adresses de chacune ; une personne présente dans plusieurs listes ne le reçoit qu'une fois.
+        Les destinataires sont en copie cachée. Pour changer les entités, utilisez « Entités de la société » ci-dessus.</p>
+    </div>
+
+    <details class="span2 smtp" {% if mail.config_error %}open{% endif %}>
+      <summary>Serveur d'envoi (SMTP){% if not mail.config_error %} · <span class="muted">{{ settings.smtp_host }}, {{ settings.mail_from }}</span>{% endif %}</summary>
+      <div class="grid3">
+        <label>Serveur SMTP
+          <input name="smtp_host" value="{{ settings.smtp_host }}" placeholder="smtp.office365.com" spellcheck="false">
+        </label>
+        <label>Sécurité
+          <select name="smtp_security" id="smtp-security">
+            {% for key, (label, port) in mail.security.items() %}<option value="{{ key }}" data-port="{{ port }}" {% if settings.smtp_security == key %}selected{% endif %}>{{ label }}</option>{% endfor %}
+          </select>
+        </label>
+        <label>Port
+          <input type="number" name="smtp_port" id="smtp-port" min="1" max="65535" value="{{ mail.port }}">
+        </label>
+        <label>Identifiant <span class="muted small">(vide : relais sans authentification)</span>
+          <input name="smtp_user" value="{{ settings.smtp_user }}" autocomplete="off" spellcheck="false">
+        </label>
+        <label>Mot de passe
+          <input type="password" name="smtp_password" autocomplete="new-password"
+                 placeholder="{{ '•••••••• (enregistré, inchangé si vide)' if mail.password_set else '' }}">
+          {% if mail.password_env %}<span class="muted small">Défini sur le serveur (COMAXIANS_SMTP_PASSWORD) : il est prioritaire.</span>{% endif %}
+        </label>
+        <label>Adresse d'expédition
+          <input type="email" name="mail_from" value="{{ settings.mail_from }}" placeholder="affichage@axians.fr" spellcheck="false">
+        </label>
+        <label>Nom de l'expéditeur
+          <input name="mail_from_name" value="{{ settings.mail_from_name }}" placeholder="{{ settings.site_name }} Affichage">
+        </label>
+        <div class="span2">
+          <span class="field-label">Apparence de l'e-mail</span>
+          <div class="seg-ctl">
+            {% for key, label in mail.themes.items() %}
+              <label><input type="radio" name="mail_theme" value="{{ key }}" {% if settings.mail_theme == key %}checked{% endif %}><span>{{ theme_icons[key] }} {{ label }}</span></label>
+            {% endfor %}
+          </div>
+        </div>
+      </div>
+      <p class="muted small">Microsoft 365 : <code>smtp.office365.com</code>, STARTTLS, port 587, avec un compte autorisé à envoyer en SMTP.
+        Relais interne de l'entreprise : son nom, souvent sans identifiant (sécurité « aucune », port 25).
+        Le mot de passe n'est jamais réaffiché ni inclus dans les sauvegardes.</p>
+    </details>
+
+    <div class="span2 mail-actions">
+      <button class="btn btn-primary" name="action" value="save">Enregistrer</button>
+      <span class="mail-test">
+        <input type="email" name="test_to" value="{{ mail.test_to }}" placeholder="votre adresse" aria-label="Adresse pour l'e-mail de test">
+        <button class="btn" name="action" value="test">Enregistrer et envoyer un test</button>
+      </span>
+    </div>
+  </form>
+  {% if mail.status %}
+    <p class="small mail-status {{ 'ok' if mail.status.ok else 'err' }}">{{ '✓' if mail.status.ok else '⚠' }} Dernière activité {{ mail.status.when }} : {{ mail.status.message }}</p>
+  {% endif %}
+  {% if not mail.pillow %}
+    <p class="muted small">Sur ce serveur, les images WebP ne peuvent pas être jointes aux e-mails (Outlook ne les affiche pas et le module Pillow,
+      qui les convertit, est absent) : relancez l'installation ou la mise à jour pour l'ajouter.</p>
+  {% endif %}
+  <script>
+    // Port proposé selon le mode de sécurité (s'il n'a pas été personnalisé)
+    (() => {
+      const sec = document.getElementById('smtp-security'), port = document.getElementById('smtp-port');
+      const defaults = [...sec.options].map((o) => o.dataset.port);
+      sec.addEventListener('change', () => {
+        if (!port.value || defaults.includes(port.value)) port.value = sec.selectedOptions[0].dataset.port;
+      });
+    })();
+  </script>
 </section>
 
 <section class="card settings" id="maj">

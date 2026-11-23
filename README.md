@@ -39,6 +39,7 @@ Détails, écrans supplémentaires et mises à jour : voir [Mise en production](
 - **Aperçu** de chaque diapositive depuis l'admin ; flèche droite / espace pour passer à la suivante.
 - **Dupliquer** un contenu : la copie (titre suivi de « (copie) ») est placée juste sous l'original, désactivée, et s'ouvre directement en modification ; on l'active une fois modifiée. L'image ou la vidéo est partagée avec l'original et n'est supprimée du disque que lorsque plus aucune diapositive ne l'utilise.
 - **Sauvegarde et restauration** depuis l'admin : un fichier .zip regroupe contenus, images, vidéos, paramètres et thèmes des écrans ; l'import le réapplique (voir [Ce qui est conservé à chaque mise à jour](#ce-qui-est-conservé-à-chaque-mise-à-jour)).
+- **E-mail à la publication** : chaque nouveau contenu est envoyé par e-mail, avec la même mise en forme que sur les écrans (logo, couleurs du type de contenu, photo, chiffre clé, date…), au moment où il commence à être diffusé. Les destinataires se règlent **par entité** (ex. Cloud, Communication) ; aperçu, test et envoi manuel depuis l'admin. Voir [E-mail à la publication](#e-mail-à-la-publication).
 
 ## Démarrage rapide (poste de test)
 
@@ -178,8 +179,8 @@ sudo comaxians-restore /var/backups/comaxians/comaxians-avant-maj-20261106-10300
 L'état actuel est lui-même sauvegardé (`comaxians-avant-restauration-…`) avant la restauration ; le serveur est arrêté puis relancé automatiquement.
 
 **Sans ligne de commande : section « Sauvegarde et restauration » de l'admin.**
-- *Télécharger la sauvegarde* : un fichier `axians-affichage-AAAA-MM-JJ-HHhMM.zip` avec tous les contenus, leurs images et vidéos, les paramètres et les thèmes des écrans (ni le mot de passe, ni la clé de session). Il contient les dates d'anniversaire : à conserver en lieu sûr.
-- *Importer et remplacer* : remplace tous les contenus, paramètres et thèmes des écrans par ceux du fichier. Le fichier est entièrement vérifié avant toute modification (format, version, fichiers endommagés, place disponible) ; en cas de problème, rien n'est modifié. Une copie de l'état précédent est faite juste avant et reste téléchargeable dans la même section (les 2 plus récentes sont gardées, dans `/var/lib/comaxians/exports`).
+- *Télécharger la sauvegarde* : un fichier `axians-affichage-AAAA-MM-JJ-HHhMM.zip` avec tous les contenus, leurs images et vidéos, les paramètres (dont les destinataires des e-mails) et les thèmes des écrans (ni le mot de passe de l'admin ou du serveur d'envoi des e-mails, ni la clé de session). Il contient les dates d'anniversaire et des adresses e-mail : à conserver en lieu sûr.
+- *Importer et remplacer* : remplace tous les contenus, paramètres et thèmes des écrans par ceux du fichier. Le fichier est entièrement vérifié avant toute modification (format, version, fichiers endommagés, place disponible) ; en cas de problème, rien n'est modifié. Une copie de l'état précédent est faite juste avant et reste téléchargeable dans la même section (les 2 plus récentes sont gardées, dans `/var/lib/comaxians/exports`). L'activation de l'envoi des e-mails et le mot de passe SMTP restent ceux de ce serveur ; les contenus du fichier déjà en diffusion ne sont pas envoyés par e-mail.
 - Utile pour recopier l'affichage sur un autre serveur, ou le reconstruire après une réinstallation. Taille maximale d'un import : `COMAXIANS_MAX_UPLOAD_MB` (500 Mo par défaut).
 
 > Les contenus d'exemple ne sont créés qu'à la toute première installation : si vous supprimez toutes les diapositives, la liste reste vide après un redémarrage ou une mise à jour.
@@ -325,6 +326,7 @@ Sur une VM Linux ou un NAS (pour un Raspberry Pi dédié, préférez l'[option B
 sudo useradd -r -m -d /opt/comaxians comaxians
 sudo -u comaxians git clone https://github.com/garg24/comaxians.git /opt/comaxians
 cd /opt/comaxians && sudo -u comaxians python3 -m venv .venv && sudo -u comaxians .venv/bin/pip install -r requirements.txt
+sudo -u comaxians .venv/bin/pip install Pillow   # facultatif : images des e-mails (WebP converti, photos allégées)
 sudo cp deploy/comaxians.service /etc/systemd/system/   # éditez le mot de passe
 sudo systemctl daemon-reload && sudo systemctl enable --now comaxians
 ```
@@ -343,6 +345,27 @@ docker run -d --restart=always -p 8080:8080 -v axians-data:/data -e COMAXIANS_AD
 Chaque Raspberry Pi s'installe en « écran seul », exactement comme ci-dessus (commande `curl … | bash` affichée dans l'admin). Matériel conseillé pour un écran Full HD fluide : Raspberry Pi 4 (2 Go) ou Pi 5.
 
 Options du player : `?screen=<nom>` pour identifier l'écran (ciblage des contenus et thème), `&lite=1` pour désactiver les animations (Raspberry Pi 3), `&theme=light`, `&theme=dark` ou `&theme=alternate` pour forcer un thème localement (prioritaire sur le réglage de l'admin).
+
+## E-mail à la publication
+
+Section « E-mail à la publication » de l'admin (page des contenus, sous les paramètres des écrans) :
+
+1. **Serveur d'envoi (SMTP)**
+   - *Microsoft 365* : `smtp.office365.com`, STARTTLS, port 587, avec l'identifiant et le mot de passe d'une boîte autorisée à envoyer en SMTP (l'« authentification SMTP » doit être activée pour cette boîte par l'administrateur Microsoft 365). L'adresse d'expédition est celle de cette boîte.
+   - *Relais SMTP de l'entreprise* : son nom, sécurité « Aucune », port 25, sans identifiant (le relais doit accepter l'adresse IP du serveur).
+   - Le mot de passe n'est jamais réaffiché ni inclus dans les sauvegardes. Il peut aussi être placé sur le serveur, dans `/etc/comaxians.env` : `COMAXIANS_SMTP_PASSWORD=…` (prioritaire), puis `sudo systemctl restart comaxians`.
+2. **Destinataires par entité** : une liste par entité déclarée dans « Entités de la société » (ex. Cloud, Communication), plus une liste « Contenus sans entité ». Une adresse par ligne ou séparées par des virgules ; une liste copiée depuis Outlook (« Dupont, Jean <jean.dupont@…> ; … ») convient.
+3. Cocher **« Envoyer automatiquement les nouveaux contenus par e-mail »**, puis **« Enregistrer et envoyer un test »** vers votre adresse.
+
+Quand part l'e-mail ?
+- **Une seule fois par contenu, quand il commence à être diffusé** : 2 minutes après son enregistrement (le temps de corriger une coquille), quand on active un contenu désactivé, ou le jour de sa date de début à partir de 8 h.
+- Aux adresses de **toutes ses entités** (une personne présente dans plusieurs listes ne le reçoit qu'une fois), en copie cachée ; un contenu sans entité part à la liste « Contenus sans entité ».
+- Pas d'e-mail pour les anniversaires, ni pour un contenu dont la case « Envoyer par e-mail à la publication » est décochée (elle l'est par défaut pour les vidéos). Les contenus déjà en diffusion quand on active l'envoi, ou importés d'une sauvegarde, ne sont pas envoyés.
+- Une modification après l'envoi ne renvoie pas l'e-mail ; une copie (« Dupliquer ») est un nouveau contenu, envoyé à sa publication.
+
+La liste des contenus indique l'état de chacun (*✉ Envoi prévu à 10:42*, *✉ Envoyé le 23/11 à 10:42*, *✉ Envoi le 25/11 à 8 h*…). Un clic ouvre l'**aperçu de l'e-mail** (version ordinateur ou téléphone), avec les destinataires, un envoi de test vers votre adresse et l'envoi manuel (ou le renvoi). En cas d'échec (serveur injoignable, mot de passe refusé…), l'erreur s'affiche dans la section et dans la liste, et l'envoi est retenté automatiquement, de plus en plus espacé (jusqu'à toutes les 30 minutes).
+
+Mise en forme : thème sombre ou clair au choix, compatible Outlook, Gmail et téléphones. Les photos sont jointes au message (converties en JPEG et allégées, portrait de l'employé du mois arrondi) grâce au module Python **Pillow**, installé automatiquement par le script d'installation ou de mise à jour ; sans lui, tout fonctionne mais les images WebP ne sont pas jointes. Les images SVG ne sont pas jointes (ni Outlook ni Gmail ne les affichent) ; une vidéo est remplacée par une invitation à la regarder sur les écrans.
 
 ## Conseils éditoriaux
 
@@ -363,11 +386,12 @@ Options du player : `?screen=<nom>` pour identifier l'écran (ciblage des conten
 app/
   app.py                 serveur Flask (API, admin, base SQLite)
   templates/             pages admin + player
+  templates/mail/        e-mail envoyé à la publication d'un contenu
   static/css/theme.css   couleurs et typographie
   static/css/display.css mise en page des écrans (canevas 1920×1080)
   static/css/admin.css   style de l'interface d'administration
   static/js/display.js   lecture de la playlist, vidéos, transitions, cache hors ligne
-  static/img/            logo Axians (couleur et blanc)
+  static/img/            logo Axians (couleur et blanc ; PNG pour les e-mails)
   static/fonts/          police Inter (facultatif)
 deploy/                  scripts Raspberry Pi (installation serveur + écran, serveur seul, écran seul,
                          désinstallation)
