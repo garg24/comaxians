@@ -10,6 +10,7 @@ from __future__ import annotations
 import base64
 import calendar
 import hashlib
+import hmac
 import io
 import json
 import os
@@ -704,7 +705,8 @@ def administration():
                            screens=list_screens(), themes=THEMES, theme_icons=THEME_ICONS,
                            version=installed_version()[:7] or "inconnue", update_status=update_progress(),
                            can_update=UPDATER_BIN.exists(), backup=backup_info(), mail=mail_admin_info(settings),
-                           users=list_users(settings), roles=ROLES, role_help=ROLE_HELP, password_min=PASSWORD_MIN)
+                           users=list_users(settings), roles=ROLES, role_help=ROLE_HELP, password_min=PASSWORD_MIN,
+                           master_min=MASTER_MIN)
 
 
 def admin_tab(tab: str, query: str = ""):
@@ -2195,7 +2197,10 @@ def backup_info() -> dict:
     info = {"slides": db.execute("SELECT COUNT(*) FROM slides").fetchone()[0],
             "media": len(media), "size": _human_size(size),
             "too_big": size > app.config["MAX_CONTENT_LENGTH"],
-            "max_mb": app.config["MAX_CONTENT_LENGTH"] // (1024 * 1024), "safety": None}
+            "max_mb": app.config["MAX_CONTENT_LENGTH"] // (1024 * 1024), "safety": None,
+            # sauvegarde chiffrée des comptes
+            "users": db.execute("SELECT COUNT(*) FROM users").fetchone()[0],
+            "smtp": bool((db.execute("SELECT value FROM settings WHERE key='smtp_password'").fetchone() or [""])[0])}
     copies = _safety_copies()
     if copies:
         s = copies[0].name   # avant-import-AAAAMMJJ-HHMMSS.zip
@@ -2405,6 +2410,187 @@ def import_data():
         msg += f" {_plural(prep['missing'], 'visuel manquait', 'visuels manquaient')} dans le fichier."
     flash(msg + " Les écrans se mettent à jour d'eux-mêmes en moins d'une minute.", "ok")
     return redirect(url_for("admin"))   # importé : la liste des contenus importés, avec le message
+
+
+# ------------------------------------------------- sauvegarde chiffrée des comptes et mots de passe
+# Fichier séparé de la sauvegarde .zip : comptes utilisateurs (mots de passe hachés) et mot de passe SMTP,
+# chiffrés avec un mot de passe maître. Bibliothèque standard uniquement (rien à installer sur le Pi) :
+#   clés     : scrypt(mot de passe maître, sel aléatoire) → 64 octets = clé de chiffrement + clé d'authentification
+#   chiffre  : HMAC-SHA256 en mode compteur (flux pseudo-aléatoire, nonce aléatoire) combiné par XOR
+#   intégrité: HMAC-SHA256 sur l'en-tête et le texte chiffré, vérifié avant tout déchiffrement
+# Mauvais mot de passe maître ou fichier modifié : refusé, rien n'est changé.
+SECRETS_FORMAT = "comaxians-comptes"
+SECRETS_VERSION = 1
+SECRETS_KDF = {"n": 2 ** 15, "r": 8, "p": 1}
+SECRETS_MAX_BYTES = 2 * 1024 * 1024
+MASTER_MIN = 12
+
+
+def _secrets_keys(master: str, salt: bytes, n: int, r: int, p: int) -> tuple[bytes, bytes]:
+    key = hashlib.scrypt(master.encode("utf-8"), salt=salt, n=n, r=r, p=p, maxmem=64 * 1024 * 1024, dklen=64)
+    return key[:32], key[32:]
+
+
+def _keystream_xor(key: bytes, nonce: bytes, data: bytes) -> bytes:
+    out = bytearray()
+    for i in range(0, len(data), 32):
+        block = hmac.new(key, nonce + (i // 32).to_bytes(8, "big"), hashlib.sha256).digest()
+        chunk = data[i:i + 32]
+        out += (int.from_bytes(chunk, "big") ^ int.from_bytes(block[:len(chunk)], "big")).to_bytes(len(chunk), "big")
+    return bytes(out)
+
+
+def _secrets_header(n: int, r: int, p: int, salt: bytes, nonce: bytes) -> bytes:
+    return f"{SECRETS_FORMAT}/{SECRETS_VERSION}/scrypt/{n}/{r}/{p}/".encode() + salt + nonce
+
+
+def encrypt_secrets(payload: dict, master: str) -> dict:
+    salt, nonce = secrets.token_bytes(16), secrets.token_bytes(16)
+    kdf = SECRETS_KDF
+    enc_key, mac_key = _secrets_keys(master, salt, **kdf)
+    data = _keystream_xor(enc_key, nonce, json.dumps(payload, ensure_ascii=False).encode("utf-8"))
+    tag = hmac.new(mac_key, _secrets_header(kdf["n"], kdf["r"], kdf["p"], salt, nonce) + data, hashlib.sha256).digest()
+    b64 = lambda b: base64.b64encode(b).decode("ascii")   # noqa: E731
+    return {"format": SECRETS_FORMAT, "version": SECRETS_VERSION,
+            "created": datetime.now().isoformat(timespec="seconds"),
+            "kdf": {"name": "scrypt", **kdf, "salt": b64(salt)},
+            "cipher": "hmac-sha256-ctr", "mac": "hmac-sha256",
+            "nonce": b64(nonce), "data": b64(data), "tag": b64(tag)}
+
+
+def decrypt_secrets(env: dict, master: str) -> dict:
+    """Vérifie puis déchiffre un fichier de comptes ; ImportRefused si illisible, modifié ou mauvais mot de passe."""
+    if not isinstance(env, dict) or env.get("format") != SECRETS_FORMAT:
+        raise ImportRefused("Ce fichier n'est pas une sauvegarde des comptes de l'affichage : rien n'a été modifié.")
+    if env.get("version") != SECRETS_VERSION:
+        raise ImportRefused("Sauvegarde des comptes d'une version plus récente de l'application : mettez d'abord ce "
+                            "serveur à jour. Rien n'a été modifié.")
+    try:
+        kdf = env["kdf"]
+        n, r, p = int(kdf["n"]), int(kdf["r"]), int(kdf["p"])
+        salt, nonce = base64.b64decode(kdf["salt"], validate=True), base64.b64decode(env["nonce"], validate=True)
+        data, tag = base64.b64decode(env["data"], validate=True), base64.b64decode(env["tag"], validate=True)
+    except (KeyError, TypeError, ValueError):
+        raise ImportRefused("Sauvegarde des comptes endommagée : rien n'a été modifié.") from None
+    # Paramètres bornés : un fichier fabriqué ne peut pas faire calculer le serveur indéfiniment
+    if kdf.get("name") != "scrypt" or n not in (2 ** 14, 2 ** 15, 2 ** 16) or r != 8 or p != 1 \
+            or len(salt) != 16 or len(nonce) != 16 or len(tag) != 32:
+        raise ImportRefused("Sauvegarde des comptes endommagée : rien n'a été modifié.")
+    enc_key, mac_key = _secrets_keys(master, salt, n, r, p)
+    expected = hmac.new(mac_key, _secrets_header(n, r, p, salt, nonce) + data, hashlib.sha256).digest()
+    if not hmac.compare_digest(expected, tag):
+        raise ImportRefused("Mot de passe maître incorrect (ou fichier modifié) : rien n'a été modifié.")
+    try:
+        payload = json.loads(_keystream_xor(enc_key, nonce, data).decode("utf-8"))
+    except (UnicodeDecodeError, ValueError):
+        raise ImportRefused("Sauvegarde des comptes endommagée : rien n'a été modifié.") from None
+    if not isinstance(payload, dict) or not isinstance(payload.get("users"), list):
+        raise ImportRefused("Sauvegarde des comptes endommagée : rien n'a été modifié.")
+    return payload
+
+
+def accounts_payload() -> dict:
+    db = get_db()
+    users = [{"username": r["username"], "name": r["name"] or "", "role": r["role"], "password": r["password"],
+              "builtin": bool(r["builtin"]), "created_at": r["created_at"] or ""}
+             for r in db.execute("SELECT * FROM users ORDER BY id")]
+    smtp = db.execute("SELECT value FROM settings WHERE key='smtp_password'").fetchone()
+    return {"created": datetime.now().isoformat(timespec="seconds"), "app_version": installed_version()[:7],
+            "users": users, "smtp_password": (smtp[0] if smtp else "") or ""}
+
+
+def _valid_account(u) -> bool:
+    return (isinstance(u, dict) and isinstance(u.get("username"), str) and bool(_USERNAME.match(u["username"]))
+            and u.get("role") in ROLES and isinstance(u.get("name", ""), str)
+            and isinstance(u.get("password"), str) and 10 <= len(u["password"]) <= 400
+            and u["password"].startswith(("scrypt:", "pbkdf2:")) and "$" in u["password"])
+
+
+def restore_accounts(payload: dict) -> dict:
+    """Comptes du fichier recréés ou remis à l'identique (nom, rôle, mot de passe) ; les comptes absents du fichier
+    sont gardés. Le compte d'origine reste administrateur et le mien garde son rôle (comme dans la section
+    Utilisateurs). Mot de passe remis : les autres sessions de ce compte sont fermées."""
+    db, me = get_db(), current_user()
+    now = datetime.now().isoformat(timespec="seconds")
+    res = {"created": 0, "updated": 0, "skipped": 0, "smtp": False, "mine": False}
+    for u in payload["users"][:500]:
+        if not _valid_account(u):
+            res["skipped"] += 1
+            continue
+        name = " ".join(u.get("name", "").split())[:60]
+        row = db.execute("SELECT * FROM users WHERE username=?", (u["username"],)).fetchone()
+        if row is None:
+            db.execute("INSERT INTO users(username, name, role, password, token, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+                       (u["username"].lower(), name, u["role"], u["password"], secrets.token_hex(16),
+                        str(u.get("created_at") or now)[:19]))
+            res["created"] += 1
+            continue
+        role = row["role"] if (row["builtin"] or row["id"] == me["id"]) else u["role"]
+        db.execute("UPDATE users SET name=?, role=? WHERE id=?", (name, role, row["id"]))
+        if u["password"] != row["password"]:
+            db.execute("UPDATE users SET password=? WHERE id=?", (u["password"], row["id"]))
+            _rotate_token(db, row["id"])
+            res["mine"] = res["mine"] or row["id"] == me["id"]
+        res["updated"] += 1
+    smtp = payload.get("smtp_password")
+    if isinstance(smtp, str) and smtp and len(smtp) <= 500:
+        db.execute("INSERT INTO settings(key, value) VALUES ('smtp_password', ?) "
+                   "ON CONFLICT(key) DO UPDATE SET value=excluded.value", (smtp,))
+        res["smtp"] = True
+    db.commit()
+    return res
+
+
+@app.route("/admin/comptes/export", methods=["POST"])
+@admin_required
+def accounts_export():
+    master, confirm = request.form.get("master", ""), request.form.get("master_confirm", "")
+    if len(master) < MASTER_MIN:
+        flash(f"Mot de passe maître trop court ({MASTER_MIN} caractères minimum) : aucun fichier créé.", "error")
+        return admin_tab("sauvegarde")
+    if master != confirm or len(master) > 200:
+        flash("Les deux mots de passe maîtres saisis sont différents : aucun fichier créé.", "error")
+        return admin_tab("sauvegarde")
+    env = encrypt_secrets(accounts_payload(), master)
+    body = io.BytesIO(json.dumps(env, indent=2).encode("utf-8"))
+    return send_file(body, mimetype="application/json", as_attachment=True, max_age=0,
+                     download_name=f"axians-affichage-comptes-{datetime.now():%Y-%m-%d-%Hh%M}.json")
+
+
+@app.route("/admin/comptes/import", methods=["POST"])
+@admin_required
+def accounts_import():
+    f = request.files.get("comptes")
+    master = request.form.get("master", "")
+    if not f or not f.filename:
+        flash("Choisissez le fichier de sauvegarde des comptes (.json) à restaurer.", "error")
+        return admin_tab("sauvegarde")
+    raw = f.stream.read(SECRETS_MAX_BYTES + 1)
+    try:
+        if len(raw) > SECRETS_MAX_BYTES:
+            raise ImportRefused("Fichier trop volumineux pour une sauvegarde des comptes : rien n'a été modifié.")
+        try:
+            env = json.loads(raw.decode("utf-8"))
+        except (UnicodeDecodeError, ValueError):
+            raise ImportRefused("Ce fichier n'est pas une sauvegarde des comptes de l'affichage : "
+                                "rien n'a été modifié.") from None
+        payload = decrypt_secrets(env, master)
+    except ImportRefused as e:
+        flash(str(e), "error")
+        return admin_tab("sauvegarde")
+    res = restore_accounts(payload)
+    parts = [_plural(res["created"], "compte recréé", "comptes recréés"),
+             _plural(res["updated"], "compte remis à l'identique", "comptes remis à l'identique")]
+    msg = "Comptes restaurés : " + ", ".join(parts)
+    if res["smtp"]:
+        msg += ", mot de passe du serveur d'envoi des e-mails"
+    msg += "."
+    if res["skipped"]:
+        msg += f" {_plural(res['skipped'], 'compte ignoré', 'comptes ignorés')} (illisible par cette version)."
+    if res["mine"]:
+        msg += " Votre mot de passe est désormais celui du fichier."
+    flash(msg, "ok")
+    return admin_tab("utilisateurs")
 
 
 @app.errorhandler(413)

@@ -310,7 +310,9 @@
   <h2>Sauvegarde et restauration</h2>
   <p class="muted small" style="margin-top:-8px">Un seul fichier (.zip) regroupe tous les contenus avec leurs images et vidéos, les paramètres
     et les thèmes des écrans. Il permet de revenir en arrière, de reconstruire l'affichage après une réinstallation ou de le recopier
-    sur un autre serveur. Les comptes utilisateurs et les mots de passe n'y figurent pas ; les dates d'anniversaire, si : conservez ce fichier en lieu sûr.</p>
+    sur un autre serveur. Les comptes utilisateurs et les mots de passe n'y figurent pas (voir « Comptes et mots de passe » plus bas) ;
+    les dates d'anniversaire, si : conservez ce fichier en lieu sûr.</p>
+  <div class="flash-slot"></div>
   <div class="backup-grid">
     <div class="backup-box">
       <h3>Exporter</h3>
@@ -337,6 +339,41 @@
       {% endif %}
     </div>
   </div>
+
+  <h3 class="secrets-title">🔒 Comptes et mots de passe <span class="muted small">(fichier séparé, chiffré)</span></h3>
+  <p class="muted small">Les comptes utilisateurs (identifiant, nom, rôle, mot de passe haché) et le mot de passe du serveur d'envoi des
+    e-mails, chiffrés avec un <strong>mot de passe maître</strong> que vous choisissez. Sans lui, le fichier est illisible et ne peut pas être
+    restauré : conservez-le à part (gestionnaire de mots de passe), jamais avec le fichier.</p>
+  <div class="backup-grid">
+    <div class="backup-box">
+      <h3>Exporter les comptes</h3>
+      <form method="post" action="{{ url_for('accounts_export') }}" class="secrets-form" id="secrets-export">
+        <input type="hidden" name="csrf" value="{{ csrf_token() }}">
+        <label>Mot de passe maître <span class="muted small">({{ master_min }} caractères min.)</span>
+          <input type="password" name="master" required minlength="{{ master_min }}" maxlength="200" autocomplete="new-password">
+        </label>
+        <label>Confirmation
+          <input type="password" name="master_confirm" required minlength="{{ master_min }}" maxlength="200" autocomplete="new-password">
+        </label>
+        <button class="btn btn-primary">⬇ Télécharger les comptes chiffrés</button>
+      </form>
+      <p class="muted small">{{ backup.users }} compte{{ 's' if backup.users > 1 }}{% if backup.smtp %} et le mot de passe SMTP{% endif %}.</p>
+    </div>
+    <div class="backup-box">
+      <h3>Restaurer les comptes</h3>
+      <form method="post" action="{{ url_for('accounts_import') }}" enctype="multipart/form-data" class="secrets-form"
+            data-confirm="Confirmer la restauration ?">
+        <input type="hidden" name="csrf" value="{{ csrf_token() }}">
+        <input type="file" name="comptes" accept=".json,application/json" required>
+        <label>Mot de passe maître
+          <input type="password" name="master" required maxlength="200" autocomplete="off">
+        </label>
+        <button class="btn">Restaurer</button>
+      </form>
+      <p class="muted small">Recrée les comptes du fichier et leur remet le nom, le rôle et le mot de passe qu'ils avaient. Les comptes absents
+        du fichier sont gardés ; le compte d'origine reste administrateur et le vôtre garde son rôle. Le mot de passe SMTP est aussi remis.</p>
+    </div>
+  </div>
   <script>
     (() => {
       const form = document.getElementById('import-form'), input = document.getElementById('import-file');
@@ -352,6 +389,12 @@
         if (form.dataset.armed !== '1') return;
         setTimeout(() => { btn.disabled = true; btn.textContent = 'Import en cours… ne quittez pas la page'; });
       });
+      // Comptes chiffrés : confirmation identique exigée ; après le téléchargement, les champs sont vidés
+      const sx = document.getElementById('secrets-export');
+      const [m1, m2] = [sx.elements.master, sx.elements.master_confirm];
+      const same = () => m2.setCustomValidity(m2.value && m1.value !== m2.value ? 'Les deux saisies sont différentes.' : '');
+      m1.addEventListener('input', same); m2.addEventListener('input', same);
+      sx.addEventListener('submit', () => setTimeout(() => { m1.value = ''; m2.value = ''; }, 500));
     })();
   </script>
 </section>

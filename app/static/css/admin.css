@@ -426,3 +426,10 @@ textarea { resize: vertical; }
   .user-panel { padding-left: 18px; }
   .add-user { grid-template-columns: 1fr; }
 }
+
+/* Sauvegarde chiffrée des comptes */
+.secrets-title { margin: 26px 0 4px; padding-top: 20px; border-top: 1px solid var(--line); font-size: 17px; }
+.secrets-title + p { margin: 0; }
+.backup-box .secrets-form { flex-direction: column; align-items: stretch; width: 100%; }
+.secrets-form label { width: 100%; }
+.secrets-form .btn { align-self: flex-start; }
