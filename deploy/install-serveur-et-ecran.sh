@@ -86,7 +86,7 @@ cat <<EOF
 
 $(printf '\033[1;32m')Installation tout-en-un terminée.$(printf '\033[0m')
 
-  Administration (depuis votre PC) : http://$IP:$PORT/admin
+  Administration (depuis votre PC) : http://$IP:$PORT/admin   (identifiant : admin)
 
   À faire maintenant :
    1. Réservez l'adresse $IP pour ce Raspberry Pi dans votre box / routeur (réservation DHCP).

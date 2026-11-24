@@ -40,6 +40,7 @@ Détails, écrans supplémentaires et mises à jour : voir [Mise en production](
 - **Dupliquer** un contenu : la copie (titre suivi de « (copie) ») est placée juste sous l'original, désactivée, et s'ouvre directement en modification ; on l'active une fois modifiée. L'image ou la vidéo est partagée avec l'original et n'est supprimée du disque que lorsque plus aucune diapositive ne l'utilise.
 - **Sauvegarde et restauration** depuis l'admin : un fichier .zip regroupe contenus, images, vidéos, paramètres et thèmes des écrans ; l'import le réapplique (voir [Ce qui est conservé à chaque mise à jour](#ce-qui-est-conservé-à-chaque-mise-à-jour)).
 - **E-mail à la publication** : chaque nouveau contenu est envoyé par e-mail, avec la même mise en forme que sur les écrans (logo, couleurs du type de contenu, photo, chiffre clé, date…), au moment où il commence à être diffusé. Les destinataires se règlent **par entité** (ex. Cloud, Communication) ; aperçu, test et envoi manuel depuis l'admin. Voir [E-mail à la publication](#e-mail-à-la-publication).
+- **Utilisateurs et rôles** : chacun se connecte avec son identifiant. Les **administrateurs** ont accès à tout (paramètres, e-mail, écrans, mise à jour, sauvegarde, utilisateurs) ; les **éditeurs** gèrent uniquement les contenus. Voir [Utilisateurs](#utilisateurs).
 
 ## Démarrage rapide (poste de test)
 
@@ -51,14 +52,14 @@ python -m venv .venv
 .venv\Scripts\python run.py
 ```
 
-- Administration : http://localhost:8080/admin (mot de passe par défaut : `axians`)
+- Administration : http://localhost:8080/admin (identifiant `admin`, mot de passe par défaut : `axians`)
 - Écran : http://localhost:8080/display
 
 Variables d'environnement :
 
 | Variable | Rôle | Défaut |
 |---|---|---|
-| `COMAXIANS_ADMIN_PASSWORD` | mot de passe de l'admin | `axians` (**à changer**) |
+| `COMAXIANS_ADMIN_PASSWORD` | mot de passe d'installation du compte `admin` (voir [Utilisateurs](#utilisateurs)) | `axians` (**à changer**) |
 | `COMAXIANS_SECRET_KEY` | clé de session | générée dans `data/.secret_key` |
 | `COMAXIANS_DATA_DIR` | base SQLite + images téléversées | `./data` |
 | `PORT` | port HTTP | `8080` |
@@ -165,7 +166,8 @@ Options : `--screen NOM`, `--full-animations`, `--resolution 720p|1080p|keep`, `
 |---|---|
 | Application (`/opt/comaxians`) | remplacée par la nouvelle version |
 | Contenus, images, écrans, paramètres (`/var/lib/comaxians`) | **conservés** – le dossier `data/` de l'archive est ignoré, même créée avec `-WithData` |
-| Mot de passe admin | conservé (sauf si `COMAXIANS_ADMIN_PASSWORD=…` est fourni) |
+| Mot de passe admin | conservé (sauf si `COMAXIANS_ADMIN_PASSWORD=…` est fourni : il devient celui du compte `admin`) |
+| Utilisateurs et leurs mots de passe | **conservés** |
 
 Juste avant de remplacer l'application, le script fait une **sauvegarde automatique** (`comaxians-avant-maj-….tar.gz`, conservée 90 jours). Si la sauvegarde échoue, la mise à jour s'arrête sans rien modifier.
 
@@ -179,8 +181,8 @@ sudo comaxians-restore /var/backups/comaxians/comaxians-avant-maj-20261106-10300
 L'état actuel est lui-même sauvegardé (`comaxians-avant-restauration-…`) avant la restauration ; le serveur est arrêté puis relancé automatiquement.
 
 **Sans ligne de commande : section « Sauvegarde et restauration » de l'admin.**
-- *Télécharger la sauvegarde* : un fichier `axians-affichage-AAAA-MM-JJ-HHhMM.zip` avec tous les contenus, leurs images et vidéos, les paramètres (dont les destinataires des e-mails) et les thèmes des écrans (ni le mot de passe de l'admin ou du serveur d'envoi des e-mails, ni la clé de session). Il contient les dates d'anniversaire et des adresses e-mail : à conserver en lieu sûr.
-- *Importer et remplacer* : remplace tous les contenus, paramètres et thèmes des écrans par ceux du fichier. Le fichier est entièrement vérifié avant toute modification (format, version, fichiers endommagés, place disponible) ; en cas de problème, rien n'est modifié. Une copie de l'état précédent est faite juste avant et reste téléchargeable dans la même section (les 2 plus récentes sont gardées, dans `/var/lib/comaxians/exports`). L'activation de l'envoi des e-mails et le mot de passe SMTP restent ceux de ce serveur ; les contenus du fichier déjà en diffusion ne sont pas envoyés par e-mail.
+- *Télécharger la sauvegarde* : un fichier `axians-affichage-AAAA-MM-JJ-HHhMM.zip` avec tous les contenus, leurs images et vidéos, les paramètres (dont les destinataires des e-mails) et les thèmes des écrans (ni les comptes utilisateurs et leurs mots de passe, ni celui du serveur d'envoi des e-mails, ni la clé de session). Il contient les dates d'anniversaire et des adresses e-mail : à conserver en lieu sûr.
+- *Importer et remplacer* : remplace tous les contenus, paramètres et thèmes des écrans par ceux du fichier. Le fichier est entièrement vérifié avant toute modification (format, version, fichiers endommagés, place disponible) ; en cas de problème, rien n'est modifié. Une copie de l'état précédent est faite juste avant et reste téléchargeable dans la même section (les 2 plus récentes sont gardées, dans `/var/lib/comaxians/exports`). Les utilisateurs, l'activation de l'envoi des e-mails et le mot de passe SMTP restent ceux de ce serveur ; les contenus du fichier déjà en diffusion ne sont pas envoyés par e-mail.
 - Utile pour recopier l'affichage sur un autre serveur, ou le reconstruire après une réinstallation. Taille maximale d'un import : `COMAXIANS_MAX_UPLOAD_MB` (500 Mo par défaut).
 
 > Les contenus d'exemple ne sont créés qu'à la toute première installation : si vous supprimez toutes les diapositives, la liste reste vide après un redémarrage ou une mise à jour.
@@ -366,6 +368,26 @@ Quand part l'e-mail ?
 La liste des contenus indique l'état de chacun (*✉ Envoi prévu à 10:42*, *✉ Envoyé le 23/11 à 10:42*, *✉ Envoi le 25/11 à 8 h*…). Un clic ouvre l'**aperçu de l'e-mail** (version ordinateur ou téléphone), avec les destinataires, un envoi de test vers votre adresse et l'envoi manuel (ou le renvoi). En cas d'échec (serveur injoignable, mot de passe refusé…), l'erreur s'affiche dans la section et dans la liste, et l'envoi est retenté automatiquement, de plus en plus espacé (jusqu'à toutes les 30 minutes).
 
 Mise en forme : thème sombre ou clair au choix, compatible Outlook, Gmail et téléphones. Les photos sont jointes au message (converties en JPEG et allégées, portrait de l'employé du mois arrondi) grâce au module Python **Pillow**, installé automatiquement par le script d'installation ou de mise à jour ; sans lui, tout fonctionne mais les images WebP ne sont pas jointes. Les images SVG ne sont pas jointes (ni Outlook ni Gmail ne les affichent) ; une vidéo est remplacée par une invitation à la regarder sur les écrans.
+
+## Utilisateurs
+
+Chacun se connecte avec son **identifiant** et son mot de passe. Deux profils :
+
+| | Administrateur | Éditeur |
+|---|---|---|
+| Contenus : créer, modifier, dupliquer, ordre, activer, supprimer, aperçus | ✔ | ✔ |
+| Aperçu de l'e-mail d'un contenu, test, envoi manuel | ✔ | ✔ |
+| Paramètres des écrans (bandeau « En bref », durée, thème, entités) | ✔ | |
+| E-mail à la publication (serveur SMTP, destinataires) | ✔ | |
+| Écrans, mise à jour, sauvegarde et restauration | ✔ | |
+| Utilisateurs : créer, modifier, réinitialiser un mot de passe, supprimer | ✔ | |
+
+- **Premier administrateur** : le compte `admin`, avec le mot de passe choisi à l'installation (`COMAXIANS_ADMIN_PASSWORD`, `axians` par défaut). Il reste toujours administrateur et ne peut pas être supprimé. À la mise à jour d'une installation existante, il est créé avec le mot de passe actuel : rien ne change pour se connecter, à part l'identifiant `admin` à saisir.
+- **Section « Utilisateurs »** de l'admin (lien en haut de page) : ajouter un compte (identifiant, nom, mot de passe de 8 caractères minimum, rôle), le modifier (nom, rôle, nouveau mot de passe) ou le supprimer. Un administrateur ne peut ni changer son propre rôle ni supprimer son propre compte.
+- **Mon compte** (nom en haut à droite) : chacun change son nom affiché et son mot de passe (le mot de passe actuel est demandé). Un changement de mot de passe ferme les autres sessions ouvertes avec ce compte ; un rôle changé ou un compte supprimé s'applique immédiatement.
+- **Mot de passe du compte `admin` perdu** : sur le serveur, changez le mot de passe d'installation (ligne `COMAXIANS_ADMIN_PASSWORD="…"` de `/etc/comaxians.env`, avec `sudo nano /etc/comaxians.env`), puis `sudo systemctl restart comaxians` ; ou relancez la commande d'installation précédée du nouveau mot de passe (`curl -fsSL …/install.sh | COMAXIANS_ADMIN_PASSWORD='nouveau-mot-de-passe' bash -s -- --screen accueil`). Au redémarrage, le compte `admin` reprend ce mot de passe et redevient administrateur ; les autres comptes ne changent pas.
+- Après 10 échecs de connexion en 15 minutes depuis un même poste, la connexion est refusée quelques minutes.
+- Les mots de passe sont enregistrés hachés (scrypt). Les comptes ne font pas partie de la sauvegarde (.zip) et ne sont pas remplacés par un import.
 
 ## Conseils éditoriaux
 

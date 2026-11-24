@@ -34,7 +34,8 @@
     </dl>
     {% for w in warnings %}<p class="small warn">{{ w }}</p>{% endfor %}
     {% if mail.config_error %}
-      <p class="small warn">Envoi impossible pour l'instant : {{ mail.config_error }} (section <a href="{{ url_for('admin') }}#mail">« E-mail à la publication »</a>).</p>
+      <p class="small warn">Envoi impossible pour l'instant : {{ mail.config_error }}
+        {%- if is_admin %} (section <a href="{{ url_for('admin') }}#mail">« E-mail à la publication »</a>).{% else %} (réglage à faire par un administrateur).{% endif %}</p>
     {% endif %}
 
     <form method="post" action="{{ url_for('slide_mail_send', sid=slide.id) }}" class="mail-send">

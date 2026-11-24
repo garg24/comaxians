@@ -5,8 +5,12 @@
   <h1>Connexion</h1>
   <p class="muted">Espace de gestion des contenus diffusés sur les écrans.</p>
   <form method="post" class="card">
+    <label>Identifiant
+      <input name="username" value="{{ username }}" {% if not username %}autofocus{% endif %} required
+             autocomplete="username" autocapitalize="none" spellcheck="false" maxlength="80">
+    </label>
     <label>Mot de passe
-      <input type="password" name="password" autofocus required autocomplete="current-password">
+      <input type="password" name="password" {% if username %}autofocus{% endif %} required autocomplete="current-password">
     </label>
     <button class="btn btn-primary" type="submit">Se connecter</button>
   </form>

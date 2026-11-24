@@ -38,6 +38,7 @@ import urllib.request
 from flask import (Flask, abort, flash, g, has_request_context, jsonify, redirect, render_template,
                    request, send_file, send_from_directory, session, url_for)
 from markupsafe import Markup, escape
+from werkzeug.security import check_password_hash, generate_password_hash
 
 try:   # facultatif : images des e-mails converties (WebP → JPEG/PNG), allégées, portrait rond
     from PIL import Image, ImageDraw, ImageOps
@@ -96,7 +97,9 @@ DEFAULT_SETTINGS = {
     "smtp_user": "",
 }
 # Réglages propres à ce serveur : jamais dans une sauvegarde, jamais remplacés par un import
-LOCAL_SETTINGS = {"smtp_password", "mail_enabled", "mail_status"}
+LOCAL_SETTINGS = {"smtp_password", "mail_enabled", "mail_status", "admin_env_hash"}
+# Jamais transmis aux pages de l'admin
+SECRET_SETTINGS = {"smtp_password", "admin_env_hash"}
 # Couleurs attribuées aux entités, dans l'ordre de la liste
 ENTITY_COLORS = ["#22D3EE", "#F59E0B", "#22C55E", "#A855F7", "#FF5A5F", "#2F6BFF"]
 THEMES = {"dark": "Sombre", "light": "Clair", "alternate": "Alterné"}
@@ -123,7 +126,9 @@ app.config.update(
     SESSION_COOKIE_HTTPONLY=True,
     SESSION_COOKIE_SAMESITE="Lax",
 )
+# Mot de passe de l'installation : celui du compte administrateur d'origine (identifiant BASE_ADMIN)
 ADMIN_PASSWORD = os.environ.get("COMAXIANS_ADMIN_PASSWORD", "axians")
+BASE_ADMIN = "admin"
 
 
 # --------------------------------------------------------------------------- DB
@@ -161,6 +166,17 @@ CREATE TABLE IF NOT EXISTS screens (
 CREATE TABLE IF NOT EXISTS settings (
     key   TEXT PRIMARY KEY,
     value TEXT
+);
+CREATE TABLE IF NOT EXISTS users (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    username   TEXT NOT NULL UNIQUE COLLATE NOCASE,
+    name       TEXT DEFAULT '',
+    role       TEXT NOT NULL DEFAULT 'editor',
+    password   TEXT NOT NULL,
+    builtin    INTEGER DEFAULT 0,
+    token      TEXT NOT NULL,
+    created_at TEXT DEFAULT '',
+    last_login TEXT DEFAULT ''
 );
 """
 
@@ -209,8 +225,32 @@ def init_db():
         db.execute("INSERT OR IGNORE INTO settings(key, value) VALUES (?, ?)", (k, v))
     if new_database:
         _seed(db)
+    _sync_base_admin(db)
     db.commit()
     db.close()
+
+
+def _sync_base_admin(db: sqlite3.Connection):
+    """Compte « admin » d'origine, premier administrateur : créé au premier démarrage avec le mot de passe
+    de l'installation (COMAXIANS_ADMIN_PASSWORD), puis modifiable dans l'admin. S'il est perdu, relancer
+    l'installation avec un nouveau COMAXIANS_ADMIN_PASSWORD redonne ce mot de passe au compte."""
+    row = db.execute("SELECT value FROM settings WHERE key='admin_env_hash'").fetchone()
+    base = db.execute("SELECT id FROM users WHERE builtin=1").fetchone()
+    if base and row and row[0] and check_password_hash(row[0], ADMIN_PASSWORD):
+        return   # mot de passe de l'installation inchangé : le compte garde le sien
+    pw = generate_password_hash(ADMIN_PASSWORD)
+    if not base:
+        base = db.execute("SELECT id FROM users WHERE username=?", (BASE_ADMIN,)).fetchone()
+    if base:
+        db.execute("UPDATE users SET password=?, role='admin', builtin=1, token=? WHERE id=?",
+                   (pw, secrets.token_hex(16), base[0]))
+    else:
+        db.execute("INSERT INTO users(username, name, role, password, builtin, token, created_at) "
+                   "VALUES (?, ?, 'admin', ?, 1, ?, ?)",
+                   (BASE_ADMIN, "Administrateur", pw, secrets.token_hex(16),
+                    datetime.now().isoformat(timespec="seconds")))
+    db.execute("INSERT INTO settings(key, value) VALUES ('admin_env_hash', ?) "
+               "ON CONFLICT(key) DO UPDATE SET value=excluded.value", (pw,))
 
 
 MONTHS_FR = ["janvier", "février", "mars", "avril", "mai", "juin", "juillet",
@@ -280,11 +320,57 @@ def get_settings() -> dict:
 
 
 # ------------------------------------------------------------------------- auth
+# Deux profils : les administrateurs ont accès à tout (paramètres, e-mail, écrans, mise à jour, sauvegarde,
+# utilisateurs) ; les éditeurs gèrent uniquement les contenus.
+ROLES = {"admin": "Administrateur", "editor": "Éditeur"}
+ROLE_HELP = {"admin": "Contenus, paramètres, e-mail, écrans, mise à jour, sauvegarde et utilisateurs",
+             "editor": "Contenus uniquement : création, modification, ordre, activation, suppression"}
+PASSWORD_MIN = 8
+_USERNAME = re.compile(r"^[a-z0-9][a-z0-9._@-]{1,39}$")
+LOGIN_MAX_FAILS, LOGIN_WINDOW = 10, 900       # au-delà de 10 échecs en 15 min, connexion refusée un moment
+_login_fails: dict[str, list[float]] = {}
+_login_lock = threading.Lock()
+_dummy_hash: list[str] = []
+
+
+def current_user() -> sqlite3.Row | None:
+    """Compte connecté, relu en base à chaque requête : un compte supprimé, un rôle ou un mot de passe
+    changé s'appliquent tout de suite (le jeton change avec le mot de passe : autres sessions fermées)."""
+    if "user" not in g:
+        user = None
+        if session.get("uid"):
+            r = get_db().execute("SELECT * FROM users WHERE id=?", (session["uid"],)).fetchone()
+            if r and secrets.compare_digest(r["token"], str(session.get("tok", ""))):
+                user = r
+        g.user = user
+    return g.user
+
+
+def is_admin() -> bool:
+    u = current_user()
+    return bool(u and u["role"] == "admin")
+
+
 def login_required(view):
     @wraps(view)
     def wrapped(*args, **kwargs):
-        if not session.get("admin"):
+        if not current_user():
             return redirect(url_for("login", next=request.path))
+        return view(*args, **kwargs)
+    return wrapped
+
+
+def admin_required(view):
+    """Réservé aux administrateurs (paramètres, e-mail, écrans, mise à jour, sauvegarde, utilisateurs)."""
+    @wraps(view)
+    def wrapped(*args, **kwargs):
+        if not current_user():
+            return redirect(url_for("login", next=request.path))
+        if not is_admin():
+            if request.endpoint in ("update_check", "update_state"):
+                return jsonify({"error": "Réservé aux administrateurs"}), 403
+            flash("Réservé aux administrateurs : votre compte permet de gérer les contenus.", "error")
+            return redirect(url_for("admin"))
         return view(*args, **kwargs)
     return wrapped
 
@@ -329,8 +415,8 @@ def slide_entities(r, entities: list[dict]) -> list[dict]:
 def inject_entities():
     # Hors requête (e-mail rendu par la tâche de fond) : inutile
     if not has_request_context() or request.endpoint in ("display", "uploaded", "static"):
-        return {"ENTITIES": []}
-    return {"ENTITIES": entity_list()}
+        return {"ENTITIES": [], "current_user": None, "is_admin": False}
+    return {"ENTITIES": entity_list(), "current_user": current_user(), "is_admin": is_admin()}
 
 
 @app.before_request
@@ -340,16 +426,66 @@ def check_csrf():
             abort(400, "Jeton CSRF invalide")
 
 
+def _login_wait(ip: str) -> int:
+    """Minutes d'attente imposées après trop d'échecs de connexion depuis cette adresse (0 : aucune)."""
+    now = time.time()
+    with _login_lock:
+        fails = [t for t in _login_fails.get(ip, []) if now - t < LOGIN_WINDOW]
+        if fails:
+            _login_fails[ip] = fails
+        else:
+            _login_fails.pop(ip, None)
+        if len(fails) < LOGIN_MAX_FAILS:
+            return 0
+        return max(1, -(-int(fails[0] + LOGIN_WINDOW - now) // 60))
+
+
+def _login_failed(ip: str):
+    with _login_lock:
+        _login_fails.setdefault(ip, []).append(time.time())
+
+
+def check_password(user: sqlite3.Row | None, password: str) -> bool:
+    if not _dummy_hash:
+        _dummy_hash.append(generate_password_hash(secrets.token_hex(8)))
+    # Identifiant inconnu : même temps de calcul, pour ne pas révéler quels comptes existent
+    ok = check_password_hash(user["password"] if user else _dummy_hash[0], password)
+    return bool(user) and ok
+
+
+def password_error(password: str, confirm: str | None = None) -> str:
+    if len(password) < PASSWORD_MIN:
+        return f"Mot de passe trop court ({PASSWORD_MIN} caractères minimum)."
+    if len(password) > 200:
+        return "Mot de passe trop long (200 caractères maximum)."
+    if confirm is not None and password != confirm:
+        return "Les deux mots de passe saisis sont différents."
+    return ""
+
+
 @app.route("/login", methods=["GET", "POST"])
 def login():
+    username = ""
     if request.method == "POST":
-        if secrets.compare_digest(request.form.get("password", ""), ADMIN_PASSWORD):
-            session.clear()
-            session["admin"] = True
-            nxt = request.args.get("next", "")
-            return redirect(nxt if nxt.startswith("/") and not nxt.startswith("//") else url_for("admin"))
-        flash("Mot de passe incorrect.", "error")
-    return render_template("login.html")
+        username = request.form.get("username", "").strip().lower()[:80]
+        ip = request.remote_addr or "?"
+        wait = _login_wait(ip)
+        if wait:
+            flash(f"Trop d'essais de connexion : réessayez dans {wait} minute{'s' if wait > 1 else ''}.", "error")
+        else:
+            db = get_db()
+            user = db.execute("SELECT * FROM users WHERE username=?", (username,)).fetchone()
+            if check_password(user, request.form.get("password", "")):
+                session.clear()
+                session["uid"], session["tok"] = user["id"], user["token"]
+                db.execute("UPDATE users SET last_login=? WHERE id=?",
+                           (datetime.now().isoformat(timespec="seconds"), user["id"]))
+                db.commit()
+                nxt = request.args.get("next", "")
+                return redirect(nxt if nxt.startswith("/") and not nxt.startswith("//") else url_for("admin"))
+            _login_failed(ip)
+            flash("Identifiant ou mot de passe incorrect.", "error")
+    return render_template("login.html", username=username)
 
 
 @app.route("/logout")
@@ -482,13 +618,13 @@ def playlist():
     default_duration = int(settings.get("default_duration") or 12)
     today = date.today().isoformat()
     rows = get_db().execute("SELECT * FROM slides ORDER BY position, id").fetchall()
-    if preview and session.get("admin"):
+    if preview and current_user():
         rows = [r for r in rows if r["id"] == preview]
     else:
         rows = [r for r in rows if is_live(r, today) and targets_screen(r, screen)]
     entities = entity_list(settings)
     slides = [slide_to_dict(r, default_duration, entities) for r in rows]
-    if preview and session.get("admin"):
+    if preview and current_user():
         # Aperçu d'une diapositive Anniversaires sans anniversaire aujourd'hui : on montre les prochains
         for s, r in zip(slides, rows):
             if s["type"] == "anniversaire" and not s["birthdays"]:
@@ -555,10 +691,13 @@ def admin():
             s["waiting"] = s["live"]
             s["live"] = False
         s["mail"] = mail_badge(r, settings, now)
+    if not is_admin():   # éditeur : la liste des contenus seulement, sans les sections de réglages
+        return render_template("admin.html", slides=slides, types=SLIDE_TYPES)
     return render_template("admin.html", slides=slides, types=SLIDE_TYPES, settings=public_settings(settings),
                            screens=list_screens(), themes=THEMES, theme_icons=THEME_ICONS,
                            version=installed_version()[:7] or "inconnue", update_status=update_progress(),
-                           can_update=UPDATER_BIN.exists(), backup=backup_info(), mail=mail_admin_info(settings))
+                           can_update=UPDATER_BIN.exists(), backup=backup_info(), mail=mail_admin_info(settings),
+                           users=list_users(settings), roles=ROLES, role_help=ROLE_HELP, password_min=PASSWORD_MIN)
 
 
 # ------------------------------------------------------------ mise à jour depuis l'admin
@@ -682,7 +821,7 @@ def _write_status(state: str, message: str):
 
 
 @app.route("/admin/update/check")
-@login_required
+@admin_required
 def update_check():
     try:
         res = check_update()
@@ -693,13 +832,13 @@ def update_check():
 
 
 @app.route("/admin/update/status")
-@login_required
+@admin_required
 def update_state():
     return jsonify(update_progress())
 
 
 @app.route("/admin/update/start", methods=["POST"])
-@login_required
+@admin_required
 def update_start():
     if not UPDATER_BIN.exists():
         flash("Mise à jour automatique indisponible sur ce serveur : relancez la commande d'installation "
@@ -724,7 +863,7 @@ def update_start():
 
 
 @app.route("/admin/screens", methods=["POST"])
-@login_required
+@admin_required
 def screen_save():
     name = normalize_screen(request.form.get("name", ""))
     theme = request.form.get("theme", "")
@@ -742,7 +881,7 @@ def screen_save():
 
 
 @app.route("/admin/screens/delete", methods=["POST"])
-@login_required
+@admin_required
 def screen_delete():
     get_db().execute("DELETE FROM screens WHERE name=?", (normalize_screen(request.form.get("name", "")),))
     get_db().commit()
@@ -1058,7 +1197,7 @@ def slide_move(sid, direction):
 
 
 @app.route("/admin/settings", methods=["POST"])
-@login_required
+@admin_required
 def settings_save():
     f = request.form
     try:
@@ -1080,6 +1219,144 @@ def settings_save():
     db.commit()
     flash("Paramètres enregistrés.", "ok")
     return redirect(url_for("admin"))
+
+
+# ------------------------------------------------------------------ utilisateurs
+def _initials(text: str) -> str:
+    parts = [p for p in re.split(r"[\s._@-]+", text) if p]
+    return "".join(p[0] for p in parts[:2]).upper() or "?"
+
+
+def list_users(settings: dict) -> list[dict]:
+    me = current_user()
+    out = []
+    for r in get_db().execute("SELECT * FROM users ORDER BY builtin DESC, role, name COLLATE NOCASE, username"):
+        u = {k: r[k] for k in r.keys() if k not in ("password", "token")}
+        u["me"] = bool(me and me["id"] == r["id"])
+        u["initials"] = _initials(r["name"] or r["username"])
+        u["last_login_text"] = _fmt_stamp(r["last_login"]) if r["last_login"] else ""
+        # Compte d'origine encore avec le mot de passe « axians » par défaut (aucun calcul de hachage :
+        # le compte a gardé le mot de passe de l'installation, et celui-ci est celui par défaut)
+        u["default_password"] = bool(r["builtin"] and ADMIN_PASSWORD == "axians"
+                                     and r["password"] == settings.get("admin_env_hash"))
+        out.append(u)
+    return out
+
+
+def _user_back(uid: int | None = None):
+    return redirect(url_for("admin") + (f"?user={uid}" if uid else "") + "#utilisateurs")
+
+
+def _rotate_token(db, uid: int) -> str:
+    """Nouveau jeton : les sessions ouvertes avec l'ancien mot de passe sont fermées (sauf la mienne)."""
+    tok = secrets.token_hex(16)
+    db.execute("UPDATE users SET token=? WHERE id=?", (tok, uid))
+    me = current_user()
+    if me and me["id"] == uid:
+        session["tok"] = tok
+    return tok
+
+
+@app.route("/admin/users", methods=["POST"])
+@admin_required
+def user_create():
+    f = request.form
+    username = f.get("username", "").strip().lower()
+    name = " ".join(f.get("name", "").split())[:60]
+    role = f.get("role") if f.get("role") in ROLES else "editor"
+    password = f.get("password", "")
+    db = get_db()
+    if not _USERNAME.match(username):
+        flash("Identifiant invalide : 2 à 40 caractères, lettres sans accent, chiffres, point, tiret, @ "
+              "(ex. : prenom.nom).", "error")
+    elif db.execute("SELECT 1 FROM users WHERE username=?", (username,)).fetchone():
+        flash(f"L'identifiant « {username} » est déjà utilisé.", "error")
+    elif err := password_error(password):
+        flash(err, "error")
+    else:
+        db.execute("INSERT INTO users(username, name, role, password, token, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+                   (username, name, role, generate_password_hash(password), secrets.token_hex(16),
+                    datetime.now().isoformat(timespec="seconds")))
+        db.commit()
+        flash(f"Compte « {name or username} » créé ({ROLES[role].lower()}). Communiquez-lui son identifiant "
+              f"« {username} » et son mot de passe : il pourra le changer dans « Mon compte ».", "ok")
+    return _user_back()
+
+
+@app.route("/admin/users/<int:uid>", methods=["POST"])
+@admin_required
+def user_save(uid):
+    db = get_db()
+    u = db.execute("SELECT * FROM users WHERE id=?", (uid,)).fetchone()
+    if not u:
+        abort(404)
+    f = request.form
+    name = " ".join(f.get("name", "").split())[:60]
+    role = f.get("role", u["role"])
+    if role not in ROLES:
+        role = u["role"]
+    me = current_user()
+    if role != u["role"] and (u["builtin"] or u["id"] == me["id"]):
+        flash("Le rôle du compte d'origine et celui de votre propre compte ne peuvent pas être changés.", "error")
+        return _user_back(uid)
+    if role != "admin" and u["role"] == "admin" and \
+            db.execute("SELECT COUNT(*) FROM users WHERE role='admin'").fetchone()[0] <= 1:
+        flash("Il faut garder au moins un administrateur.", "error")
+        return _user_back(uid)
+    password = f.get("password", "")
+    if password and (err := password_error(password)):
+        flash(err, "error")
+        return _user_back(uid)
+    db.execute("UPDATE users SET name=?, role=? WHERE id=?", (name, role, uid))
+    if password:
+        db.execute("UPDATE users SET password=? WHERE id=?", (generate_password_hash(password), uid))
+        _rotate_token(db, uid)
+    db.commit()
+    label = name or u["username"]
+    flash(f"Compte « {label} » enregistré" + (" ; nouveau mot de passe actif." if password else "."), "ok")
+    return _user_back()
+
+
+@app.route("/admin/users/<int:uid>/delete", methods=["POST"])
+@admin_required
+def user_delete(uid):
+    db = get_db()
+    u = db.execute("SELECT * FROM users WHERE id=?", (uid,)).fetchone()
+    if not u:
+        return _user_back()
+    if u["builtin"] or u["id"] == current_user()["id"]:
+        flash("Le compte d'origine et votre propre compte ne peuvent pas être supprimés.", "error")
+        return _user_back(uid)
+    db.execute("DELETE FROM users WHERE id=?", (uid,))
+    db.commit()
+    flash(f"Compte « {u['name'] or u['username']} » supprimé.", "ok")
+    return _user_back()
+
+
+@app.route("/compte", methods=["GET", "POST"])
+@login_required
+def account():
+    """Mon compte : nom affiché et mot de passe (le mot de passe actuel est demandé pour le changer)."""
+    db = get_db()
+    me = current_user()
+    if request.method == "POST":
+        f = request.form
+        name = " ".join(f.get("name", "").split())[:60]
+        new = f.get("new_password", "")
+        if new:
+            if not check_password(me, f.get("current_password", "")):
+                flash("Mot de passe actuel incorrect.", "error")
+                return redirect(url_for("account"))
+            if err := password_error(new, f.get("confirm_password", "")):
+                flash(err, "error")
+                return redirect(url_for("account"))
+            db.execute("UPDATE users SET password=? WHERE id=?", (generate_password_hash(new), me["id"]))
+            _rotate_token(db, me["id"])
+        db.execute("UPDATE users SET name=? WHERE id=?", (name, me["id"]))
+        db.commit()
+        flash("Mot de passe changé : vos autres sessions ouvertes sont fermées." if new else "Compte enregistré.", "ok")
+        return redirect(url_for("account"))
+    return render_template("account.html", me=me, roles=ROLES, role_help=ROLE_HELP, password_min=PASSWORD_MIN)
 
 
 # ------------------------------------------------------------ e-mail à la publication
@@ -1107,8 +1384,8 @@ _mail_thread: threading.Thread | None = None
 
 
 def public_settings(settings: dict) -> dict:
-    """Paramètres transmis aux pages de l'admin : jamais le mot de passe SMTP."""
-    return {k: v for k, v in settings.items() if k != "smtp_password"}
+    """Paramètres transmis aux pages de l'admin : jamais le mot de passe SMTP ni celui de l'installation."""
+    return {k: v for k, v in settings.items() if k not in SECRET_SETTINGS}
 
 
 def smtp_password(settings: dict) -> str:
@@ -1686,7 +1963,7 @@ def _send_test(r, settings: dict, to: str) -> bool:
 
 
 @app.route("/admin/mail", methods=["POST"])
-@login_required
+@admin_required
 def mail_settings_save():
     f, db = request.form, get_db()
     settings = get_settings()
@@ -2053,7 +2330,7 @@ def _apply_import(z: zipfile.ZipFile, prep: dict):
 
 
 @app.route("/admin/export")
-@login_required
+@admin_required
 def export_data():
     EXPORT_DIR.mkdir(exist_ok=True)
     tmp = tempfile.TemporaryFile(dir=EXPORT_DIR)   # sur le disque, pas en mémoire (vidéos)
@@ -2068,7 +2345,7 @@ def export_data():
 
 
 @app.route("/admin/export/copie/<name>")
-@login_required
+@admin_required
 def export_safety(name):
     if not _SAFETY_NAME.match(name):
         abort(404)
@@ -2076,7 +2353,7 @@ def export_safety(name):
 
 
 @app.route("/admin/import", methods=["POST"])
-@login_required
+@admin_required
 def import_data():
     back = redirect(url_for("admin"))   # haut de page : le message et la liste des contenus sont visibles
     f = request.files.get("archive")

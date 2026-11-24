@@ -383,7 +383,7 @@ cat <<EOF
 
 $(printf '\033[1;32m')Installation du serveur terminée.$(printf '\033[0m')
 
-  Administration (depuis votre PC) : http://$IP:$PORT/admin
+  Administration (depuis votre PC) : http://$IP:$PORT/admin   (identifiant : admin)
   Aperçu de l'affichage            : http://$IP:$PORT/display
 
   À faire maintenant :

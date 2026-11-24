@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block title %}Mon compte{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <a href="{{ url_for('admin') }}" class="muted small">← Retour aux contenus</a>
+    <h1>Mon compte</h1>
+    <p class="muted">Identifiant <strong>{{ me.username }}</strong> · <span class="role-pill role-{{ me.role }}">{{ roles[me.role] }}</span>
+      <span class="small">{{ role_help[me.role] }}</span></p>
+  </div>
+</div>
+
+<section class="card settings account">
+  <form method="post" class="grid2">
+    <input type="hidden" name="csrf" value="{{ csrf_token() }}">
+    <label class="span2">Nom affiché
+      <input name="name" value="{{ me.name }}" maxlength="60" placeholder="Prénom Nom" autocomplete="name">
+    </label>
+    <div class="span2 account-pw">
+      <span class="field-label">Changer de mot de passe <span class="muted small">(laisser vide pour le garder)</span></span>
+      <div class="grid3">
+        <label>Mot de passe actuel
+          <input type="password" name="current_password" autocomplete="current-password">
+        </label>
+        <label>Nouveau mot de passe <span class="muted small">({{ password_min }} caractères min.)</span>
+          <input type="password" name="new_password" minlength="{{ password_min }}" maxlength="200" autocomplete="new-password">
+        </label>
+        <label>Confirmation
+          <input type="password" name="confirm_password" minlength="{{ password_min }}" maxlength="200" autocomplete="new-password">
+        </label>
+      </div>
+    </div>
+    <div class="span2"><button class="btn btn-primary">Enregistrer</button></div>
+  </form>
+</section>
+{% endblock %}

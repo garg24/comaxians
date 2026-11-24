@@ -13,10 +13,14 @@
       <img src="{{ url_for('static', filename='img/axians-logo-white.svg') }}" alt="Axians">
       <span>Affichage dynamique</span>
     </a>
-    {% if session.admin %}
+    {% if current_user %}
     <nav>
       <a href="{{ url_for('admin') }}">Contenus</a>
+      {% if is_admin %}
       <a href="{{ url_for('admin') }}#maj" id="nav-update" title="Rechercher une nouvelle version de l'application">Mise à jour</a>
+      <a href="{{ url_for('admin') }}#utilisateurs" title="Comptes et rôles">Utilisateurs</a>
+      {% endif %}
+      <a href="{{ url_for('account') }}" title="Mon compte : nom et mot de passe">👤 {{ current_user.name or current_user.username }}</a>
       <a href="{{ url_for('logout') }}">Déconnexion</a>
       <a href="{{ url_for('display') }}" target="_blank" rel="noopener" class="cta">Voir l'écran ↗</a>
     </nav>
