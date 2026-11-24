@@ -691,13 +691,25 @@ def admin():
             s["waiting"] = s["live"]
             s["live"] = False
         s["mail"] = mail_badge(r, settings, now)
-    if not is_admin():   # éditeur : la liste des contenus seulement, sans les sections de réglages
-        return render_template("admin.html", slides=slides, types=SLIDE_TYPES)
-    return render_template("admin.html", slides=slides, types=SLIDE_TYPES, settings=public_settings(settings),
+    return render_template("admin.html", slides=slides, types=SLIDE_TYPES)
+
+
+@app.route("/admin/administration")
+@admin_required
+def administration():
+    """Onglet « Administration » : affichage, écrans, e-mail, utilisateurs, sauvegarde, mise à jour
+    (un sous-onglet par section, choisi par l'adresse : …/administration#mail)."""
+    settings = get_settings()
+    return render_template("administration.html", settings=public_settings(settings),
                            screens=list_screens(), themes=THEMES, theme_icons=THEME_ICONS,
                            version=installed_version()[:7] or "inconnue", update_status=update_progress(),
                            can_update=UPDATER_BIN.exists(), backup=backup_info(), mail=mail_admin_info(settings),
                            users=list_users(settings), roles=ROLES, role_help=ROLE_HELP, password_min=PASSWORD_MIN)
+
+
+def admin_tab(tab: str, query: str = ""):
+    """Retour à une section de l'onglet Administration après un enregistrement."""
+    return redirect(url_for("administration") + query + "#" + tab)
 
 
 # ------------------------------------------------------------ mise à jour depuis l'admin
@@ -843,12 +855,12 @@ def update_start():
     if not UPDATER_BIN.exists():
         flash("Mise à jour automatique indisponible sur ce serveur : relancez la commande d'installation "
               "sur le Raspberry Pi (voir le README).", "error")
-        return redirect(url_for("admin") + "#maj")
+        return admin_tab("maj")
     st = update_status()
     recent = st and st.get("time", "") > (datetime.now() - timedelta(minutes=30)).isoformat(timespec="seconds")
     if st and st.get("state") in ("pending", "running") and recent:
         flash("Une mise à jour est déjà en cours.", "error")
-        return redirect(url_for("admin") + "#maj")
+        return admin_tab("maj")
     try:
         _write_status("pending", "Mise à jour demandée, démarrage…")
         UPDATE_REQUEST.write_text(datetime.now().isoformat(timespec="seconds"), encoding="utf-8")
@@ -856,10 +868,10 @@ def update_start():
         app.logger.error("Lancement de la mise à jour impossible : %s", e)
         flash(f"Impossible de lancer la mise à jour ({e.strerror or e}). Sur le Raspberry Pi, relancez la commande "
               "d'installation (voir le README).", "error")
-        return redirect(url_for("admin") + "#maj")
+        return admin_tab("maj")
     _update_cache.clear()
     flash("Mise à jour lancée : le serveur redémarre dans quelques minutes, vos contenus sont conservés.", "ok")
-    return redirect(url_for("admin") + "#maj")
+    return admin_tab("maj")
 
 
 @app.route("/admin/screens", methods=["POST"])
@@ -871,13 +883,13 @@ def screen_save():
         theme = ""  # "" = suit le thème par défaut
     if not name:
         flash("Indiquez le nom de l'écran.", "error")
-        return redirect(url_for("admin") + "#ecrans")
+        return admin_tab("ecrans")
     db = get_db()
     db.execute("INSERT INTO screens(name, theme) VALUES (?, ?) "
                "ON CONFLICT(name) DO UPDATE SET theme=excluded.theme", (name, theme))
     db.commit()
     flash(f"Écran « {name} » enregistré. Le changement s'applique dans la minute.", "ok")
-    return redirect(url_for("admin") + "#ecrans")
+    return admin_tab("ecrans")
 
 
 @app.route("/admin/screens/delete", methods=["POST"])
@@ -885,7 +897,7 @@ def screen_save():
 def screen_delete():
     get_db().execute("DELETE FROM screens WHERE name=?", (normalize_screen(request.form.get("name", "")),))
     get_db().commit()
-    return redirect(url_for("admin") + "#ecrans")
+    return admin_tab("ecrans")
 
 
 def _form_values() -> dict:
@@ -1218,7 +1230,7 @@ def settings_save():
         db.execute("INSERT INTO settings(key, value) VALUES(?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (k, v))
     db.commit()
     flash("Paramètres enregistrés.", "ok")
-    return redirect(url_for("admin"))
+    return admin_tab("parametres")
 
 
 # ------------------------------------------------------------------ utilisateurs
@@ -1244,7 +1256,7 @@ def list_users(settings: dict) -> list[dict]:
 
 
 def _user_back(uid: int | None = None):
-    return redirect(url_for("admin") + (f"?user={uid}" if uid else "") + "#utilisateurs")
+    return admin_tab("utilisateurs", f"?user={uid}" if uid else "")
 
 
 def _rotate_token(db, uid: int) -> str:
@@ -1874,7 +1886,7 @@ def mail_badge(r, settings: dict, now: datetime) -> dict | None:
             return {"text": f"✉ Envoyé {_fmt_stamp(r['mailed_at'])}", "cls": "ok", "title": note}
         if note.startswith("Non envoyé : aucune adresse"):
             return {"text": "✉ Non envoyé : aucune adresse", "cls": "warn",
-                    "title": note + " (section « E-mail à la publication »)"}
+                    "title": note + " (Administration › E-mail)"}
         if note.startswith("Envoi en cours"):
             return {"text": "✉ Envoi en cours…", "cls": "", "title": ""}
         return None   # déjà en diffusion à l'activation de l'envoi, ou importé : pas d'envoi
@@ -1924,7 +1936,7 @@ def mail_edit_hint(slide: dict) -> str:
     if mailed and not note.startswith("Envoi en cours"):
         return note + "."
     if settings.get("mail_enabled") != "1":
-        return "L'envoi automatique est désactivé (section « E-mail à la publication » de la page des contenus)."
+        return "L'envoi automatique est désactivé (onglet Administration › E-mail)."
     return (f"Envoyé une seule fois, {MAIL_DELAY // 60} minutes après sa mise en diffusion (à partir de "
             f"{MAIL_HOUR} h le jour de sa date de début), aux adresses de ses entités.")
 
@@ -2028,7 +2040,7 @@ def mail_settings_save():
             flash(f"E-mail de test non envoyé : {missing}.", "error")
         else:
             _send_test(_sample_slide(settings | values), get_settings(), test_to)
-    return redirect(url_for("admin") + "#mail")
+    return admin_tab("mail")
 
 
 def _slide_or_404(sid: int):
@@ -2069,7 +2081,7 @@ def slide_mail_send(sid):
     back = redirect(url_for("slide_mail", sid=sid))
     missing = mail_config_error(settings)
     if missing:
-        flash(f"Envoi impossible : {missing} (section « E-mail à la publication » de la page des contenus).", "error")
+        flash(f"Envoi impossible : {missing} (onglet Administration › E-mail).", "error")
         return back
     if request.form.get("mode") == "test":
         to = request.form.get("test_to", "").strip()[:254]
@@ -2084,7 +2096,7 @@ def slide_mail_send(sid):
     recipients, names = slide_recipients(row, settings)
     if not recipients:
         flash("Aucune adresse pour " + (", ".join(names) if names else "les contenus sans entité")
-              + " : complétez la section « E-mail à la publication » de la page des contenus.", "error")
+              + " : complétez l'onglet Administration › E-mail.", "error")
         return back
     try:
         refused = send_slide(row, settings, recipients)
@@ -2355,7 +2367,7 @@ def export_safety(name):
 @app.route("/admin/import", methods=["POST"])
 @admin_required
 def import_data():
-    back = redirect(url_for("admin"))   # haut de page : le message et la liste des contenus sont visibles
+    back = admin_tab("sauvegarde")   # fichier refusé : message dans la section Sauvegarde
     f = request.files.get("archive")
     if not f or not f.filename:
         flash("Choisissez le fichier de sauvegarde (.zip) à importer.", "error")
@@ -2392,7 +2404,7 @@ def import_data():
     if prep["missing"]:
         msg += f" {_plural(prep['missing'], 'visuel manquait', 'visuels manquaient')} dans le fichier."
     flash(msg + " Les écrans se mettent à jour d'eux-mêmes en moins d'une minute.", "ok")
-    return back
+    return redirect(url_for("admin"))   # importé : la liste des contenus importés, avec le message
 
 
 @app.errorhandler(413)

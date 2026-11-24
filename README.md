@@ -28,19 +28,19 @@ Détails, écrans supplémentaires et mises à jour : voir [Mise en production](
   - diapositive *Vidéo* plein écran, lue jusqu'au bout (ou pendant une durée imposée, en boucle), avec titre facultatif affiché quelques secondes en bas d'écran et son activable ;
   - une courte vidéo peut aussi remplacer la photo d'une diapositive Succès, Actualité ou Événement (lecture en boucle, sans son).
 - **Design** : thème sombre, halos de couleur animés propres à chaque type de contenu, typographie Inter très grasse, cartes translucides, indicateur de progression segmenté. Seul le logo Axians (version blanche, extraite en vectoriel de la charte) est conservé de l'identité officielle.
-- **Entités** (Cloud, Communication…) : chaque diapositive peut être rattachée à une ou plusieurs entités, affichées en étiquettes colorées à côté du surtitre. La liste des entités se modifie dans les paramètres de l'admin.
+- **Entités** (Cloud, Communication…) : chaque diapositive peut être rattachée à une ou plusieurs entités, affichées en étiquettes colorées à côté du surtitre. La liste des entités se modifie dans l'onglet *Administration › Affichage*.
 - **Compteur de jours automatique** (diapositive Chiffre clé, ex. « jours sans accident ») : on saisit la date du dernier événement, l'écran calcule et incrémente le nombre chaque jour, même hors ligne. Bouton « Remettre à zéro » dans la liste des contenus en cas de nouvel événement.
 - **Disposition au choix** pour les diapositives Succès, Actualité, Partenaire et Événement : texte à gauche et visuel à droite, ou l'inverse (champ « Disposition » du formulaire).
 - **Programmation** : dates de début et de fin, durée par diapositive, activation/désactivation, ordre de passage (↑ ↓ d'un cran, ⤒ ⤓ tout en haut ou tout en bas).
 - **Ciblage des écrans** : un même serveur pour plusieurs écrans (`/display?screen=accueil`).
-- **Thème clair ou sombre, écran par écran** : section « Écrans » de l'admin. Chaque écran y apparaît automatiquement à sa première connexion, avec son état (en ligne / dernière connexion). On choisit pour chacun *Sombre*, *Clair*, *Alterné* (une diapositive sombre, une claire, avec fondu enchaîné) ou *Par défaut* (thème par défaut réglable dans les paramètres). Le changement s'applique en moins d'une minute, sans toucher au Raspberry Pi.
+- **Thème clair ou sombre, écran par écran** : onglet *Administration › Écrans*. Chaque écran y apparaît automatiquement à sa première connexion, avec son état (en ligne / dernière connexion). On choisit pour chacun *Sombre*, *Clair*, *Alterné* (une diapositive sombre, une claire, avec fondu enchaîné) ou *Par défaut* (thème par défaut réglable dans *Administration › Affichage*). Le changement s'applique en moins d'une minute, sans toucher au Raspberry Pi.
 - **Bandeau défilant « En bref »**, heure et date, barre de progression.
 - **Robuste** : la playlist est mise en cache sur l'écran (continue de tourner si le réseau tombe), les modifications s'appliquent sans recharger la page, le texte trop long est réduit automatiquement, rechargement quotidien.
 - **Aperçu** de chaque diapositive depuis l'admin ; flèche droite / espace pour passer à la suivante.
 - **Dupliquer** un contenu : la copie (titre suivi de « (copie) ») est placée juste sous l'original, désactivée, et s'ouvre directement en modification ; on l'active une fois modifiée. L'image ou la vidéo est partagée avec l'original et n'est supprimée du disque que lorsque plus aucune diapositive ne l'utilise.
 - **Sauvegarde et restauration** depuis l'admin : un fichier .zip regroupe contenus, images, vidéos, paramètres et thèmes des écrans ; l'import le réapplique (voir [Ce qui est conservé à chaque mise à jour](#ce-qui-est-conservé-à-chaque-mise-à-jour)).
 - **E-mail à la publication** : chaque nouveau contenu est envoyé par e-mail, avec la même mise en forme que sur les écrans (logo, couleurs du type de contenu, photo, chiffre clé, date…), au moment où il commence à être diffusé. Les destinataires se règlent **par entité** (ex. Cloud, Communication) ; aperçu, test et envoi manuel depuis l'admin. Voir [E-mail à la publication](#e-mail-à-la-publication).
-- **Utilisateurs et rôles** : chacun se connecte avec son identifiant. Les **administrateurs** ont accès à tout (paramètres, e-mail, écrans, mise à jour, sauvegarde, utilisateurs) ; les **éditeurs** gèrent uniquement les contenus. Voir [Utilisateurs](#utilisateurs).
+- **Utilisateurs et rôles** : chacun se connecte avec son identifiant. Les **administrateurs** ont accès à tout (paramètres, e-mail, écrans, mise à jour, sauvegarde, utilisateurs) ; les **éditeurs** gèrent uniquement les contenus. L'interface a deux onglets : *Contenus* (pour tous) et *Administration* (affichage, écrans, e-mail, utilisateurs, sauvegarde, mise à jour : administrateurs seulement). Voir [Utilisateurs](#utilisateurs).
 
 ## Démarrage rapide (poste de test)
 
@@ -114,7 +114,7 @@ curl -fsSL https://raw.githubusercontent.com/garg24/comaxians/main/install.sh | 
 
 Sans cette étape, le Pi démarre avec 8 contenus d'exemple (personnes fictives) qui montrent chaque type de diapositive : Succès, Chiffre clé avec compteur de jours automatique, Actualité, Employé du mois, Partenaire, Événement (dans 3 semaines), Anniversaires (une personne fêtée le jour de l'installation) et Message. Modifiez-les ou supprimez-les depuis l'admin.
 
-**Mise à jour depuis l'admin** : section « Mise à jour de l'application ». Le bouton « Rechercher une mise à jour » interroge GitHub et liste les nouveautés. « Mettre à jour maintenant » télécharge puis installe la nouvelle version, sans commande à taper ; l'avancement s'affiche en direct (étapes, barre de progression, journal détaillé en cas de problème). Vos contenus sont conservés et une sauvegarde est faite avant. Ce bouton apparaît après une première mise à jour faite avec la commande ci-dessous. Il ne fonctionne pas pour une installation par archive.
+**Mise à jour depuis l'admin** : onglet *Administration › Mise à jour*. À l'ouverture, l'application interroge GitHub et liste les nouveautés (bouton « Rechercher une mise à jour » pour recommencer). « Mettre à jour maintenant » télécharge puis installe la nouvelle version, sans commande à taper ; l'avancement s'affiche en direct (étapes, barre de progression, journal détaillé en cas de problème). Vos contenus sont conservés et une sauvegarde est faite avant. Ce bouton apparaît après une première mise à jour faite avec la commande ci-dessous. Il ne fonctionne pas pour une installation par archive.
 
 **Mise à jour en ligne de commande** : relancez simplement la commande (le code est mis à jour par `git pull`, vos contenus sont conservés) :
 
@@ -180,7 +180,7 @@ sudo comaxians-restore /var/backups/comaxians/comaxians-avant-maj-20261106-10300
 
 L'état actuel est lui-même sauvegardé (`comaxians-avant-restauration-…`) avant la restauration ; le serveur est arrêté puis relancé automatiquement.
 
-**Sans ligne de commande : section « Sauvegarde et restauration » de l'admin.**
+**Sans ligne de commande : onglet *Administration › Sauvegarde*.**
 - *Télécharger la sauvegarde* : un fichier `axians-affichage-AAAA-MM-JJ-HHhMM.zip` avec tous les contenus, leurs images et vidéos, les paramètres (dont les destinataires des e-mails) et les thèmes des écrans (ni les comptes utilisateurs et leurs mots de passe, ni celui du serveur d'envoi des e-mails, ni la clé de session). Il contient les dates d'anniversaire et des adresses e-mail : à conserver en lieu sûr.
 - *Importer et remplacer* : remplace tous les contenus, paramètres et thèmes des écrans par ceux du fichier. Le fichier est entièrement vérifié avant toute modification (format, version, fichiers endommagés, place disponible) ; en cas de problème, rien n'est modifié. Une copie de l'état précédent est faite juste avant et reste téléchargeable dans la même section (les 2 plus récentes sont gardées, dans `/var/lib/comaxians/exports`). Les utilisateurs, l'activation de l'envoi des e-mails et le mot de passe SMTP restent ceux de ce serveur ; les contenus du fichier déjà en diffusion ne sont pas envoyés par e-mail.
 - Utile pour recopier l'affichage sur un autre serveur, ou le reconstruire après une réinstallation. Taille maximale d'un import : `COMAXIANS_MAX_UPLOAD_MB` (500 Mo par défaut).
@@ -350,7 +350,7 @@ Options du player : `?screen=<nom>` pour identifier l'écran (ciblage des conten
 
 ## E-mail à la publication
 
-Section « E-mail à la publication » de l'admin (page des contenus, sous les paramètres des écrans) :
+Onglet *Administration › E-mail* :
 
 1. **Serveur d'envoi (SMTP)**
    - *Microsoft 365* : `smtp.office365.com`, STARTTLS, port 587, avec l'identifiant et le mot de passe d'une boîte autorisée à envoyer en SMTP (l'« authentification SMTP » doit être activée pour cette boîte par l'administrateur Microsoft 365). L'adresse d'expédition est celle de cette boîte.
@@ -383,7 +383,7 @@ Chacun se connecte avec son **identifiant** et son mot de passe. Deux profils :
 | Utilisateurs : créer, modifier, réinitialiser un mot de passe, supprimer | ✔ | |
 
 - **Premier administrateur** : le compte `admin`, avec le mot de passe choisi à l'installation (`COMAXIANS_ADMIN_PASSWORD`, `axians` par défaut). Il reste toujours administrateur et ne peut pas être supprimé. À la mise à jour d'une installation existante, il est créé avec le mot de passe actuel : rien ne change pour se connecter, à part l'identifiant `admin` à saisir.
-- **Section « Utilisateurs »** de l'admin (lien en haut de page) : ajouter un compte (identifiant, nom, mot de passe de 8 caractères minimum, rôle), le modifier (nom, rôle, nouveau mot de passe) ou le supprimer. Un administrateur ne peut ni changer son propre rôle ni supprimer son propre compte.
+- **Onglet *Administration › Utilisateurs*** : ajouter un compte (identifiant, nom, mot de passe de 8 caractères minimum, rôle), le modifier (nom, rôle, nouveau mot de passe) ou le supprimer. Un administrateur ne peut ni changer son propre rôle ni supprimer son propre compte.
 - **Mon compte** (nom en haut à droite) : chacun change son nom affiché et son mot de passe (le mot de passe actuel est demandé). Un changement de mot de passe ferme les autres sessions ouvertes avec ce compte ; un rôle changé ou un compte supprimé s'applique immédiatement.
 - **Mot de passe du compte `admin` perdu** : sur le serveur, changez le mot de passe d'installation (ligne `COMAXIANS_ADMIN_PASSWORD="…"` de `/etc/comaxians.env`, avec `sudo nano /etc/comaxians.env`), puis `sudo systemctl restart comaxians` ; ou relancez la commande d'installation précédée du nouveau mot de passe (`curl -fsSL …/install.sh | COMAXIANS_ADMIN_PASSWORD='nouveau-mot-de-passe' bash -s -- --screen accueil`). Au redémarrage, le compte `admin` reprend ce mot de passe et redevient administrateur ; les autres comptes ne changent pas.
 - Après 10 échecs de connexion en 15 minutes depuis un même poste, la connexion est refusée quelques minutes.

@@ -1,0 +1,501 @@
+{% extends "base.html" %}
+{% block title %}Administration{% endblock %}
+{% block content %}
+{#- Réglages, administrateurs seulement : un sous-onglet par section (#parametres, #ecrans, #mail…).
+    Les sections portent data-tab et non id : l'adresse #mail affiche l'onglet sans faire défiler la page. #}
+<div class="page-head">
+  <div>
+    <h1>Administration</h1>
+    <p class="muted">Réglages des écrans, e-mail, utilisateurs, sauvegarde et mise à jour · version <code>{{ version }}</code></p>
+  </div>
+</div>
+{% set tabs = [('parametres', 'Affichage'), ('ecrans', 'Écrans'), ('mail', 'E-mail'), ('utilisateurs', 'Utilisateurs'),
+               ('sauvegarde', 'Sauvegarde'), ('maj', 'Mise à jour')] %}
+<nav class="subtabs" aria-label="Sections de l'administration">
+  {% for key, label in tabs %}<a href="#{{ key }}" data-tab-link="{{ key }}">{{ label }}</a>{% endfor %}
+</nav>
+
+<div class="admin-panels">
+<section class="card settings" data-tab="parametres">
+  <h2>Paramètres des écrans</h2>
+  <form method="post" action="{{ url_for('settings_save') }}" class="grid2">
+    <input type="hidden" name="csrf" value="{{ csrf_token() }}">
+    <label class="span2">Bandeau défilant « En bref » <span class="muted small">(une information par ligne)</span>
+      <textarea name="ticker" rows="4" placeholder="Ex. : Le restaurant d'entreprise sera fermé vendredi">{{ settings.ticker }}</textarea>
+    </label>
+    <label>Durée par défaut d'une diapositive (secondes)
+      <input type="number" name="default_duration" min="4" max="120" value="{{ settings.default_duration }}">
+    </label>
+    <div class="checks">
+      <label class="check"><input type="checkbox" name="show_clock" {% if settings.show_clock == '1' %}checked{% endif %}> Afficher l'heure et la date</label>
+      <label class="check"><input type="checkbox" name="show_ticker" {% if settings.show_ticker == '1' %}checked{% endif %}> Afficher le bandeau défilant</label>
+    </div>
+    <div>
+      <span class="field-label">Thème par défaut des écrans</span>
+      <div class="seg-ctl">
+        {% for key, label in themes.items() %}
+          <label><input type="radio" name="default_theme" value="{{ key }}" {% if settings.default_theme == key %}checked{% endif %}><span>{{ theme_icons[key] }} {{ label }}</span></label>
+        {% endfor %}
+      </div>
+    </div>
+    <label>Entités de la société <span class="muted small">(une par ligne – proposées à chaque diapositive)</span>
+      <textarea name="entities" rows="3" placeholder="Cloud&#10;Communication">{{ settings.entities }}</textarea>
+    </label>
+    <div class="span2"><button class="btn btn-primary">Enregistrer les paramètres</button></div>
+  </form>
+</section>
+
+<section class="card settings" data-tab="ecrans">
+  <h2>Écrans</h2>
+  <p class="muted small" style="margin-top:-8px">Choisissez le thème de chaque écran. Le changement s'applique en moins d'une minute, sans intervention sur le Raspberry Pi.</p>
+
+  {% if screens %}
+  <div class="screens">
+    {% for sc in screens %}
+    <div class="screen-row">
+      <div class="screen-name">
+        <span class="dot {{ 'on' if sc.online else '' }}" title="{{ 'En ligne' if sc.online else 'Hors ligne' }}"></span>
+        <div>
+          <strong>{{ sc.name }}</strong>
+          <div class="muted small">
+            {% if sc.online %}En ligne{% elif sc.last_seen %}Vu le {{ sc.last_seen[8:10] }}/{{ sc.last_seen[5:7] }} à {{ sc.last_seen[11:16] }}{% else %}Jamais connecté{% endif %}
+          </div>
+        </div>
+      </div>
+      <form method="post" action="{{ url_for('screen_save') }}" class="seg-ctl">
+        <input type="hidden" name="csrf" value="{{ csrf_token() }}">
+        <input type="hidden" name="name" value="{{ sc.name }}">
+        <label><input type="radio" name="theme" value="" {% if not sc.theme %}checked{% endif %} onchange="this.form.submit()"><span>Par défaut ({{ themes[settings.default_theme]|lower }})</span></label>
+        {% for key, label in themes.items() %}
+          <label><input type="radio" name="theme" value="{{ key }}" {% if sc.theme == key %}checked{% endif %} onchange="this.form.submit()"><span>{{ theme_icons[key] }} {{ label }}</span></label>
+        {% endfor %}
+      </form>
+      <div class="actions">
+        <a class="btn" href="{{ url_for('display', screen=sc.name) }}" target="_blank" rel="noopener">Ouvrir ↗</a>
+        {% if sc.last_seen or sc.theme %}
+        <form method="post" action="{{ url_for('screen_delete') }}" data-confirm="Retirer ?">
+          <input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="name" value="{{ sc.name }}">
+          <button class="icon" title="Retirer">×</button>
+        </form>
+        {% endif %}
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  <form method="post" action="{{ url_for('screen_save') }}" class="add-screen">
+    <input type="hidden" name="csrf" value="{{ csrf_token() }}">
+    <input name="name" placeholder="Nom d'un nouvel écran (ex. : accueil)" maxlength="40" required>
+    <select name="theme">
+      <option value="">Thème par défaut</option>
+      {% for key, label in themes.items() %}<option value="{{ key }}">{{ label }}</option>{% endfor %}
+    </select>
+    <button class="btn">Ajouter l'écran</button>
+  </form>
+
+  <div class="install-box">
+    <strong>Installer un nouvel écran (Raspberry Pi)</strong>
+    <p class="muted small">Sur le nouveau Raspberry Pi (Raspberry Pi OS Desktop, connecté au même réseau), ouvrez un terminal et collez cette commande en remplaçant <em>NOM</em> par le nom de l'écran (ex. : hall, cafeteria) :</p>
+    {% set server_host = request.host %}
+    <div class="cmd">
+      <code id="install-cmd">curl -fsSL http://{{ server_host }}/install-ecran.sh | bash -s -- --server {{ server_host }} --screen NOM</code>
+      <button type="button" class="btn btn-sm" id="copy-cmd">Copier</button>
+    </div>
+    {% if request.host.split(':')[0] in ('localhost', '127.0.0.1') %}
+    <p class="muted small">⚠ Vous consultez l'admin via <code>localhost</code> : remplacez-le par l'adresse IP du serveur dans la commande.</p>
+    {% endif %}
+    <p class="muted small">Puis redémarrez le Pi : l'écran apparaît automatiquement dans la liste ci-dessus, où vous choisissez son thème.</p>
+  </div>
+  <div class="install-box">
+    <strong>Installer un écran sur une box Android / Android TV</strong>
+    <p class="muted small">Sur la box, téléchargez et installez l'application <em>Axians Affichage</em> :
+      <a href="https://github.com/garg24/comaxians/releases/latest/download/comaxians-ecran.apk" target="_blank" rel="noopener">comaxians-ecran.apk</a>
+      (par exemple avec l'application <em>Downloader</em>). Au premier lancement, saisissez :</p>
+    <p class="muted small">• Adresse du serveur : <code>{{ request.host.split(':')[0] }}</code> &nbsp;• Nom de cet écran : au choix (ex. : hall)</p>
+    <p class="muted small">L'écran apparaît ensuite dans la liste ci-dessus. Sur la box, la touche Retour de la télécommande rouvre les réglages.</p>
+  </div>
+  <p class="muted small">Adresse affichée par chaque écran : <code>{{ url_for('display', _external=True) }}?screen=<em>nom</em></code>. Sans <code>?screen=</code>, l'écran utilise le thème par défaut.</p>
+  <script>
+    document.getElementById('copy-cmd').addEventListener('click', async (e) => {
+      const text = document.getElementById('install-cmd').textContent;
+      try { await navigator.clipboard.writeText(text); }
+      catch (_) {   // presse-papiers indisponible hors HTTPS : sélection du texte
+        const r = document.createRange(); r.selectNodeContents(document.getElementById('install-cmd'));
+        const s = getSelection(); s.removeAllRanges(); s.addRange(r); document.execCommand('copy');
+      }
+      e.target.textContent = 'Copié ✓';
+      setTimeout(() => { e.target.textContent = 'Copier'; }, 2000);
+    });
+  </script>
+</section>
+
+<section class="card settings" data-tab="mail">
+  <h2>E-mail à la publication</h2>
+  <p class="muted small" style="margin-top:-8px">Chaque nouveau contenu est envoyé une seule fois par e-mail, avec sa mise en forme, quand il commence
+    à être diffusé : {{ mail.delay }} minutes après son enregistrement (le temps de corriger une coquille), ou à partir de {{ mail.hour }} h
+    le jour de sa date de début. Il part aux adresses de ses entités. Les anniversaires ne sont jamais envoyés ; pour un autre contenu,
+    décochez « Envoyer par e-mail à la publication » dans sa page.</p>
+  <div class="flash-slot"></div>
+  <form method="post" action="{{ url_for('mail_settings_save') }}" class="grid2" autocomplete="off">
+    <input type="hidden" name="csrf" value="{{ csrf_token() }}">
+    <label class="check span2 mail-switch"><input type="checkbox" name="mail_enabled" {% if settings.mail_enabled == '1' %}checked{% endif %}>
+      <strong>Envoyer automatiquement les nouveaux contenus par e-mail</strong></label>
+
+    <div class="span2">
+      <span class="field-label">Destinataires par entité <span class="muted small" style="font-weight:400">(une adresse par ligne, ou séparées par des virgules ; une liste copiée depuis Outlook convient)</span></span>
+      <div class="mail-lists">
+        {% for l in mail.lists %}
+        <label class="mail-list">
+          <span class="mail-list-head">
+            {% if l.color %}<span class="ent-mini" style="--ec: {{ l.color }}">{{ l.label }}</span>{% else %}<span class="mail-noent">{{ l.label }}</span>{% endif %}
+            <span class="muted small">{{ l.count }} adresse{{ 's' if l.count > 1 }}</span>
+          </span>
+          <textarea name="to:{{ l.key }}" rows="3" placeholder="prenom.nom@axians.fr" spellcheck="false">{{ l.addrs }}</textarea>
+        </label>
+        {% endfor %}
+      </div>
+      <p class="muted small">Un contenu de plusieurs entités part aux adresses de chacune ; une personne présente dans plusieurs listes ne le reçoit qu'une fois.
+        Les destinataires sont en copie cachée. Pour changer les entités : « Entités de la société », sous-onglet <a href="#parametres">Affichage</a>.</p>
+    </div>
+
+    <details class="span2 smtp" {% if mail.config_error %}open{% endif %}>
+      <summary>Serveur d'envoi (SMTP){% if not mail.config_error %} · <span class="muted">{{ settings.smtp_host }}, {{ settings.mail_from }}</span>{% endif %}</summary>
+      <div class="grid3">
+        <label>Serveur SMTP
+          <input name="smtp_host" value="{{ settings.smtp_host }}" placeholder="smtp.office365.com" spellcheck="false">
+        </label>
+        <label>Sécurité
+          <select name="smtp_security" id="smtp-security">
+            {% for key, (label, port) in mail.security.items() %}<option value="{{ key }}" data-port="{{ port }}" {% if settings.smtp_security == key %}selected{% endif %}>{{ label }}</option>{% endfor %}
+          </select>
+        </label>
+        <label>Port
+          <input type="number" name="smtp_port" id="smtp-port" min="1" max="65535" value="{{ mail.port }}">
+        </label>
+        <label>Identifiant <span class="muted small">(vide : relais sans authentification)</span>
+          <input name="smtp_user" value="{{ settings.smtp_user }}" autocomplete="off" spellcheck="false">
+        </label>
+        <label>Mot de passe
+          <input type="password" name="smtp_password" autocomplete="new-password"
+                 placeholder="{{ '•••••••• (enregistré, inchangé si vide)' if mail.password_set else '' }}">
+          {% if mail.password_env %}<span class="muted small">Défini sur le serveur (COMAXIANS_SMTP_PASSWORD) : il est prioritaire.</span>{% endif %}
+        </label>
+        <label>Adresse d'expédition
+          <input type="email" name="mail_from" value="{{ settings.mail_from }}" placeholder="affichage@axians.fr" spellcheck="false">
+        </label>
+        <label>Nom de l'expéditeur
+          <input name="mail_from_name" value="{{ settings.mail_from_name }}" placeholder="{{ settings.site_name }} Affichage">
+        </label>
+        <div class="span2">
+          <span class="field-label">Apparence de l'e-mail</span>
+          <div class="seg-ctl">
+            {% for key, label in mail.themes.items() %}
+              <label><input type="radio" name="mail_theme" value="{{ key }}" {% if settings.mail_theme == key %}checked{% endif %}><span>{{ theme_icons[key] }} {{ label }}</span></label>
+            {% endfor %}
+          </div>
+        </div>
+      </div>
+      <p class="muted small">Microsoft 365 : <code>smtp.office365.com</code>, STARTTLS, port 587, avec un compte autorisé à envoyer en SMTP.
+        Relais interne de l'entreprise : son nom, souvent sans identifiant (sécurité « aucune », port 25).
+        Le mot de passe n'est jamais réaffiché ni inclus dans les sauvegardes.</p>
+    </details>
+
+    <div class="span2 mail-actions">
+      <button class="btn btn-primary" name="action" value="save">Enregistrer</button>
+      <span class="mail-test">
+        <input type="email" name="test_to" value="{{ mail.test_to }}" placeholder="votre adresse" aria-label="Adresse pour l'e-mail de test">
+        <button class="btn" name="action" value="test">Enregistrer et envoyer un test</button>
+      </span>
+    </div>
+  </form>
+  {% if mail.status %}
+    <p class="small mail-status {{ 'ok' if mail.status.ok else 'err' }}">{{ '✓' if mail.status.ok else '⚠' }} Dernière activité {{ mail.status.when }} : {{ mail.status.message }}</p>
+  {% endif %}
+  {% if not mail.pillow %}
+    <p class="muted small">Sur ce serveur, les images WebP ne peuvent pas être jointes aux e-mails (Outlook ne les affiche pas et le module Pillow,
+      qui les convertit, est absent) : relancez l'installation ou la mise à jour pour l'ajouter.</p>
+  {% endif %}
+  <script>
+    // Port proposé selon le mode de sécurité (s'il n'a pas été personnalisé)
+    (() => {
+      const sec = document.getElementById('smtp-security'), port = document.getElementById('smtp-port');
+      const defaults = [...sec.options].map((o) => o.dataset.port);
+      sec.addEventListener('change', () => {
+        if (!port.value || defaults.includes(port.value)) port.value = sec.selectedOptions[0].dataset.port;
+      });
+    })();
+  </script>
+</section>
+
+<section class="card settings" data-tab="utilisateurs">
+  <h2>Utilisateurs</h2>
+  <p class="muted small" style="margin-top:-8px">Chacun se connecte avec son identifiant et son mot de passe.
+    <strong>Administrateur</strong> : {{ role_help.admin|lower }}. <strong>Éditeur</strong> : {{ role_help.editor|lower }}.
+    Chacun peut changer son nom et son mot de passe dans « Mon compte ».</p>
+  <div class="flash-slot"></div>
+  {% set open_uid = request.args.get('user', '')|int(0) %}
+  <div class="users">
+    {% for u in users %}
+    <details class="user" {% if open_uid == u.id %}open{% endif %}>
+      <summary>
+        <span class="avatar role-{{ u.role }}" aria-hidden="true">{{ u.initials }}</span>
+        <span class="user-name">
+          <span><strong>{{ u.name or u.username }}</strong>{% if u.me %} <span class="muted small">(vous)</span>{% endif %}</span>
+          <span class="muted small">{{ u.username }}{% if u.builtin %} · compte d'origine{% endif %} ·
+            {% if u.last_login_text %}dernière connexion {{ u.last_login_text }}{% else %}jamais connecté{% endif %}</span>
+          {% if u.default_password %}<span class="small warn-text">⚠ Mot de passe par défaut « axians » : changez-le</span>{% endif %}
+        </span>
+        <span class="role-pill role-{{ u.role }}">{{ roles[u.role] }}</span>
+        <span class="btn btn-sm user-toggle">Modifier</span>
+      </summary>
+      <div class="user-panel">
+        <form method="post" action="{{ url_for('user_save', uid=u.id) }}" class="grid2">
+          <input type="hidden" name="csrf" value="{{ csrf_token() }}">
+          <label>Nom affiché
+            <input name="name" value="{{ u.name }}" maxlength="60" placeholder="Prénom Nom">
+          </label>
+          <div>
+            <span class="field-label">Rôle</span>
+            {% set locked = u.builtin or u.me %}
+            <div class="seg-ctl">
+              {% for key, label in roles.items() %}
+              <label><input type="radio" name="role" value="{{ key }}" {% if u.role == key %}checked{% endif %} {% if locked %}disabled{% endif %}><span>{{ label }}</span></label>
+              {% endfor %}
+            </div>
+            {% if locked %}<p class="muted small user-note">{{ "Le compte d'origine reste administrateur." if u.builtin else "Vous ne pouvez pas changer votre propre rôle." }}</p>{% endif %}
+          </div>
+          <label>Nouveau mot de passe <span class="muted small">(laisser vide pour le garder · {{ password_min }} caractères min.)</span>
+            <input type="password" name="password" minlength="{{ password_min }}" maxlength="200" autocomplete="new-password">
+          </label>
+          <div class="user-actions">
+            <button class="btn btn-primary">Enregistrer</button>
+          </div>
+        </form>
+        {% if not u.builtin and not u.me %}
+        <form method="post" action="{{ url_for('user_delete', uid=u.id) }}" class="user-delete" data-confirm="Confirmer la suppression ?">
+          <input type="hidden" name="csrf" value="{{ csrf_token() }}">
+          <button class="btn btn-danger">Supprimer ce compte</button>
+        </form>
+        {% endif %}
+      </div>
+    </details>
+    {% endfor %}
+  </div>
+
+  <h3 class="add-user-title">Ajouter un utilisateur</h3>
+  <form method="post" action="{{ url_for('user_create') }}" class="add-user">
+    <input type="hidden" name="csrf" value="{{ csrf_token() }}">
+    <label>Identifiant
+      <input name="username" required maxlength="40" pattern="[A-Za-z0-9][A-Za-z0-9._@\-]{1,39}" placeholder="prenom.nom"
+             autocomplete="off" autocapitalize="none" spellcheck="false" title="Lettres sans accent, chiffres, point, tiret ou @">
+    </label>
+    <label>Nom affiché
+      <input name="name" maxlength="60" placeholder="Prénom Nom" autocomplete="off">
+    </label>
+    <label>Mot de passe <span class="muted small">({{ password_min }} car. min.)</span>
+      <input type="password" name="password" required minlength="{{ password_min }}" maxlength="200" autocomplete="new-password">
+    </label>
+    <label>Rôle
+      <select name="role">
+        <option value="editor">{{ roles.editor }} (contenus)</option>
+        <option value="admin">{{ roles.admin }} (tout)</option>
+      </select>
+    </label>
+    <button class="btn">Ajouter</button>
+  </form>
+</section>
+
+<section class="card settings" data-tab="sauvegarde">
+  <h2>Sauvegarde et restauration</h2>
+  <p class="muted small" style="margin-top:-8px">Un seul fichier (.zip) regroupe tous les contenus avec leurs images et vidéos, les paramètres
+    et les thèmes des écrans. Il permet de revenir en arrière, de reconstruire l'affichage après une réinstallation ou de le recopier
+    sur un autre serveur. Les comptes utilisateurs et les mots de passe n'y figurent pas ; les dates d'anniversaire, si : conservez ce fichier en lieu sûr.</p>
+  <div class="backup-grid">
+    <div class="backup-box">
+      <h3>Exporter</h3>
+      <p class="muted small">{{ backup.slides }} contenu{{ 's' if backup.slides > 1 }} · {{ backup.media }} image{{ 's' if backup.media > 1 }} ou vidéo{{ 's' if backup.media > 1 }} · {{ backup.size }}</p>
+      <a class="btn btn-primary" href="{{ url_for('export_data') }}" download>⬇ Télécharger la sauvegarde</a>
+      {% if backup.too_big %}<p class="small warn">Ce fichier dépassera la taille d'import autorisée ({{ backup.max_mb }} Mo) : pour pouvoir le réimporter,
+        augmentez <code>COMAXIANS_MAX_UPLOAD_MB</code> sur le serveur.</p>{% endif %}
+    </div>
+    <div class="backup-box">
+      <h3>Importer</h3>
+      <form method="post" action="{{ url_for('import_data') }}" enctype="multipart/form-data" id="import-form"
+            data-confirm="Confirmer : tout remplacer ?">
+        <input type="hidden" name="csrf" value="{{ csrf_token() }}">
+        <input type="file" name="archive" accept=".zip,application/zip" required id="import-file"
+               data-max="{{ backup.max_mb * 1024 * 1024 }}">
+        <button class="btn">Importer et remplacer</button>
+      </form>
+      <p class="muted small">Remplace <strong>tous</strong> les contenus, les paramètres et les thèmes des écrans par ceux du fichier
+        (taille maximale : {{ backup.max_mb }} Mo). Les utilisateurs de ce serveur sont conservés. Une copie de l'état actuel est faite juste avant.</p>
+      <p class="small warn" id="import-warn" hidden></p>
+      {% if backup.safety %}
+      <p class="small">Copie de l'état d'avant le dernier import ({{ backup.safety.date }}) :
+        <a href="{{ url_for('export_safety', name=backup.safety.name) }}">télécharger</a> — pour revenir en arrière, importez ce fichier.</p>
+      {% endif %}
+    </div>
+  </div>
+  <script>
+    (() => {
+      const form = document.getElementById('import-form'), input = document.getElementById('import-file');
+      const warn = document.getElementById('import-warn'), btn = form.querySelector('button');
+      const mb = (n) => (n / 1048576).toFixed(0) + ' Mo';
+      input.addEventListener('change', () => {   // fichier trop gros : refusé avant l'envoi
+        const f = input.files[0], max = +input.dataset.max;
+        warn.hidden = !(f && f.size > max);
+        if (!warn.hidden) warn.textContent = `Fichier trop volumineux (${mb(f.size)}, maximum ${mb(max)}).`;
+        btn.disabled = !warn.hidden;
+      });
+      form.addEventListener('submit', () => {   // 2e clic (confirmé) : envoi en cours
+        if (form.dataset.armed !== '1') return;
+        setTimeout(() => { btn.disabled = true; btn.textContent = 'Import en cours… ne quittez pas la page'; });
+      });
+    })();
+  </script>
+</section>
+
+<section class="card settings" data-tab="maj">
+  <h2>Mise à jour de l'application</h2>
+  <p class="muted small" style="margin-top:-8px">Version installée : <code>{{ version }}</code>. Les nouvelles versions sont publiées sur
+    <a href="https://github.com/garg24/comaxians" target="_blank" rel="noopener">GitHub</a>. Vos contenus, images et mot de passe sont conservés (sauvegarde automatique juste avant).</p>
+  <div class="update-row">
+    <button type="button" class="btn" id="upd-check">Rechercher une mise à jour</button>
+    <span class="muted small" id="upd-result"></span>
+  </div>
+  <ul class="muted small" id="upd-changes" hidden></ul>
+  <form method="post" action="{{ url_for('update_start') }}" id="upd-form" hidden data-confirm="Confirmer la mise à jour ?">
+    <input type="hidden" name="csrf" value="{{ csrf_token() }}">
+    <button class="btn btn-primary">Mettre à jour maintenant</button>
+    <span class="muted small">Le serveur redémarre : les écrans continuent d'afficher leurs contenus pendant ce temps.</span>
+  </form>
+  <p class="muted small" id="upd-manual" hidden>Mise à jour depuis l'admin non disponible sur ce serveur (installé avant cette fonction, ou par archive). Sur le Raspberry Pi, lancez :<br>
+    <code>curl -fsSL https://raw.githubusercontent.com/garg24/comaxians/main/install.sh | bash</code> — ensuite, ce bouton fonctionnera.</p>
+  <div class="small upd-status" id="upd-status" hidden aria-live="polite"
+       data-state="{{ update_status.state if update_status else '' }}">
+    <div class="upd-head"><strong id="upd-msg"></strong><span id="upd-time"></span></div>
+    <div class="upd-bar" id="upd-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100"
+         aria-label="Avancement de la mise à jour" hidden><span><i></i></span></div>
+    <ol class="upd-steps" id="upd-steps" hidden></ol>
+    <details class="upd-log" id="upd-log-box" hidden><summary>Journal détaillé</summary><pre id="upd-log"></pre></details>
+  </div>
+  <script>
+    (() => {
+      const $ = (id) => document.getElementById(id);
+      const canUpdate = {{ 'true' if can_update else 'false' }};
+      $('upd-check').addEventListener('click', async () => {
+        if (['pending', 'running'].includes(st.dataset.state)) return;   // mise à jour déjà en cours
+        $('upd-result').textContent = 'Recherche en cours…';
+        $('upd-changes').hidden = true; $('upd-form').hidden = true; $('upd-manual').hidden = true;
+        try {
+          const r = await fetch('{{ url_for("update_check") }}', { cache: 'no-store' });
+          const d = await r.json();
+          if (!r.ok) throw new Error(d.error || r.status);
+          if (!d.available) { $('upd-result').textContent = '✓ Application à jour.'; return; }
+          $('upd-result').textContent = d.count ? `${d.count} nouveauté${d.count > 1 ? 's' : ''} disponible${d.count > 1 ? 's' : ''} :` : 'Nouvelle version disponible :';
+          const ul = $('upd-changes'); ul.innerHTML = '';
+          d.changes.forEach((c) => { const li = document.createElement('li'); li.textContent = `${c.date} – ${c.message}`; ul.append(li); });
+          ul.hidden = false;
+          (d.can_update ? $('upd-form') : $('upd-manual')).hidden = false;
+        } catch (e) {
+          $('upd-result').textContent = '⚠ Vérification impossible : ' + e.message;
+        }
+      });
+      // Suivi d'une mise à jour : étapes, barre d'avancement, durée, journal.
+      // Le serveur redémarre pendant l'opération : on garde alors le dernier état connu.
+      const st = $('upd-status');
+      let cur = {{ (update_status or {}) | tojson }};
+      let received = Date.now(), offline = false, watching = false;
+      const active = () => ['pending', 'running'].includes(cur.state);
+      const duration = (s) => s < 60 ? `${s} s` : `${Math.floor(s / 60)} min ${String(s % 60).padStart(2, '0')} s`;
+
+      function percent(since) {
+        if (cur.state === 'done') return 100;
+        if (cur.percent == null) return 2;
+        if (cur.state === 'error') return cur.percent;
+        // À l'intérieur d'une étape, la barre avance doucement vers le début de la suivante sans l'atteindre
+        const from = cur.percent, to = cur.next_percent ?? from;
+        const t = (cur.step_elapsed || 0) + since;
+        return from + (to - from) * 0.9 * (1 - Math.exp(-t / Math.max(5, (to - from) * 1.5)));
+      }
+
+      function render() {
+        const d = cur;
+        st.dataset.state = d.state || '';
+        if (!d.state) { st.hidden = true; return; }
+        st.hidden = false;
+        const since = active() ? Math.round((Date.now() - received) / 1000) : 0;
+        const live = active() || (watching && d.state === 'done');
+        $('upd-msg').textContent = (d.state === 'done' ? '✓ ' : d.state === 'error' ? '⚠ ' : '') + d.message;
+        $('upd-time').textContent =
+          active() && (d.elapsed ?? d.step_elapsed) != null ? `depuis ${duration((d.elapsed ?? d.step_elapsed) + since)}${offline ? ' · serveur en cours de redémarrage, reconnexion…' : ''}`
+          : d.state === 'done' && d.time ? `le ${d.time.slice(8, 10)}/${d.time.slice(5, 7)} à ${d.time.slice(11, 16)}` : '';
+        const bar = $('upd-bar'), p = Math.min(100, percent(since));
+        bar.hidden = !(live || d.state === 'error');
+        bar.querySelector('i').style.width = p + '%';
+        bar.dataset.pct = Math.floor(p) + ' %';
+        bar.setAttribute('aria-valuenow', Math.floor(p));
+        const steps = d.steps || [], ol = $('upd-steps');
+        ol.hidden = !steps.length || !(live || d.state === 'error');
+        ol.replaceChildren(...steps.map((label, i) => {
+          const li = document.createElement('li'), n = i + 1;
+          li.className = d.state === 'done' || n < d.step ? 'done' : n > d.step ? 'todo' : d.state === 'error' ? 'error' : 'current';
+          li.textContent = label;
+          return li;
+        }));
+        const box = $('upd-log-box'), pre = $('upd-log'), lines = d.log || [];
+        box.hidden = !lines.length || d.state === 'done';
+        pre.textContent = lines.join('\n');
+        pre.scrollTop = pre.scrollHeight;
+        if (d.state === 'error' && !box.dataset.shown) { box.open = true; box.dataset.shown = '1'; }   // aide au diagnostic
+        $('upd-check').disabled = active();
+      }
+
+      async function poll() {
+        watching = true;
+        try {
+          const r = await fetch('{{ url_for("update_state") }}', { cache: 'no-store' });
+          const d = await r.json();   // pendant le redémarrage : erreur réseau ou page d'erreur
+          if (d.state) { cur = d; received = Date.now(); }
+          offline = false;
+        } catch (_) { offline = true; }
+        render();
+        if (cur.state === 'done') { setTimeout(() => location.reload(), 2500); return; }
+        if (cur.state !== 'error') setTimeout(poll, 2000);
+      }
+
+      render();
+      if (active()) { poll(); setInterval(() => { if (active()) render(); }, 1000); }
+    })();
+  </script>
+</section>
+</div>
+<script>
+  // Sous-onglets : une section à la fois, choisie par l'adresse (#mail…), ce qui garde le bouton Retour
+  // et l'ouverture directe d'une section après un enregistrement (redirection vers …#mail).
+  (() => {
+    const panels = [...document.querySelectorAll('[data-tab]')];
+    const links = [...document.querySelectorAll('[data-tab-link]')];
+    const ids = panels.map((p) => p.dataset.tab);
+    let checked = false;
+    function show() {
+      let id = decodeURIComponent(location.hash.slice(1));
+      if (!ids.includes(id)) id = ids[0];
+      panels.forEach((p) => { p.hidden = p.dataset.tab !== id; });
+      links.forEach((a) => {
+        const on = a.dataset.tabLink === id;
+        a.classList.toggle('active', on);
+        if (on) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current');
+        // Petit écran : la barre défile pour que le sous-onglet ouvert soit visible
+        if (on) a.parentElement.scrollLeft = a.offsetLeft - (a.parentElement.clientWidth - a.offsetWidth) / 2;
+      });
+      // Onglet « Mise à jour » : recherche lancée à la première ouverture
+      const btn = document.getElementById('upd-check');
+      if (id === 'maj' && !checked && btn && !btn.disabled) { checked = true; btn.click(); }
+    }
+    window.addEventListener('hashchange', show);
+    show();
+  })();
+</script>
+{% endblock %}

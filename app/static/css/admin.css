@@ -326,23 +326,36 @@ textarea { resize: vertical; }
 .backup-box form { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin: 0; }
 .backup-box input[type="file"] { max-width: 100%; font: inherit; font-size: 14px; }
 .warn { color: #B45309; }
-#sauvegarde { scroll-margin-top: 90px; }
 @media (max-width: 860px) { .backup-grid { grid-template-columns: 1fr; } }
 
-/* Arrivée depuis le lien « Mise à jour » de l'en-tête : section visible sous la barre, brièvement soulignée */
-#maj { scroll-margin-top: 90px; }
-#maj.spotlight { animation: spotlight 1.8s ease; }
+/* Contenu qui vient d'être déplacé : brièvement souligné */
 @keyframes spotlight { 0%, 40% { box-shadow: 0 0 0 3px #8B5CF6, 0 10px 30px rgba(139,92,246,.25); } 100% { box-shadow: 0 0 0 0 transparent; } }
+
+/* Onglets de l'en-tête (Contenus / Administration) */
+.appbar nav { align-items: center; }
+.appbar nav a.active { background: rgba(255,255,255,.14); color: #fff; }
+.nav-sep { width: 1px; height: 22px; background: rgba(255,255,255,.2); margin: 0 6px; }
+
+/* Sous-onglets de l'administration */
+.subtabs { position: relative; display: flex; gap: 4px; border-bottom: 1px solid var(--line); margin: -6px 0 22px; overflow-x: auto; scrollbar-width: none; }
+.subtabs::-webkit-scrollbar { display: none; }
+.subtabs a { padding: 10px 16px; margin-bottom: -1px; border-bottom: 2px solid transparent; color: var(--ink-2); font-weight: 600; white-space: nowrap; }
+.subtabs a:hover { color: var(--ink); }
+.subtabs a.active { color: var(--ink); border-bottom-color: var(--primary); }
+.admin-panels { display: grid; gap: 20px; }
+.admin-panels > .settings + .settings { margin-top: 0; }
+
 /* Petit écran : les liens de l'en-tête passent sous le logo, sur une ligne */
 @media (max-width: 760px) {
   .appbar { flex-wrap: wrap; gap: 10px; padding: 12px 16px; }
   .appbar nav { width: 100%; flex-wrap: wrap; gap: 4px; }
   .appbar nav a { padding: 6px 10px; font-size: 14px; }
   .appbar nav a.cta { margin-left: auto; }
+  .nav-sep { display: none; }
+  .subtabs a { padding: 10px 12px; }
 }
 
 /* E-mail à la publication */
-#mail { scroll-margin-top: 90px; }
 .flash-slot:empty { display: none; }
 .flash-slot .flash:last-child { margin-bottom: 18px; }
 .mail-switch { font-size: 15px; }
