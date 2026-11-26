@@ -73,6 +73,25 @@ write_file() {   # write_file CHEMIN MODE [PROPRIETAIRE]
   fi
 }
 
+# Commit du code source (40 caractères), ou « inconnue » (installation par archive).
+# La mise à jour depuis l'admin lance ce script en root (systemd) : git refuse alors de lire
+# un dépôt qui appartient à un autre utilisateur (« dubious ownership »). On le relit donc
+# avec le propriétaire du dossier, comme pour le téléchargement (git pull) de la mise à jour.
+src_version() {
+  local v owner
+  if v=$(git -C "$SRC_DIR" rev-parse HEAD 2>/dev/null) && [[ $v =~ ^[0-9a-f]{40}$ ]]; then
+    echo "$v"; return
+  fi
+  owner=$(stat -c %U "$SRC_DIR" 2>/dev/null || true)
+  if [[ $EUID -eq 0 && -n $owner && $owner != root ]] && command -v runuser >/dev/null; then
+    if v=$(runuser -u "$owner" -- env HOME="$(getent passwd "$owner" | cut -d: -f6)" \
+             git -C "$SRC_DIR" rev-parse HEAD 2>/dev/null) && [[ $v =~ ^[0-9a-f]{40}$ ]]; then
+      echo "$v"; return
+    fi
+  fi
+  echo "inconnue"
+}
+
 # Données déjà présentes sur ce Pi ? (le dossier n'est lisible que par root et le service :
 # un simple [[ -f ]] lancé avec l'utilisateur normal répondrait « non » à tort)
 data_exists() {
@@ -241,7 +260,7 @@ run sudo rsync -a --delete --exclude '.venv' --exclude '__pycache__' \
 # Le script « écran » est servi par le serveur (http://…:8080/install-ecran.sh) pour équiper les Pi écrans
 run sudo install -m 644 "$SRC_DIR/deploy/install-ecran.sh" "$APP_DIR/deploy/install-ecran.sh"
 # Version installée (commit GitHub), affichée dans l'admin pour savoir si une mise à jour existe
-VERSION=$(git -C "$SRC_DIR" rev-parse HEAD 2>/dev/null || echo "inconnue")
+VERSION=$(src_version)
 printf '%s\n' "$VERSION" | write_file "$APP_DIR/VERSION" 644
 info "version installée : ${VERSION:0:7}"
 run sudo chown -R root:root "$APP_DIR"   # le service ne peut pas modifier son propre code
